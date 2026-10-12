@@ -1367,21 +1367,21 @@ int adapt_lag() {
     return v;
 }
 
-/// 0.1.43 STRATA_ADAPT_OVERLAP=1: the adaptive tier's copies land while the next decode window already runs.  The window
+/// STRATA_ADAPT_OVERLAP=1: the adaptive tier's copies land while the next decode window already runs.  The window
 /// sees the swapped-in experts as resident from its first layer, exactly as after #463's wait (so the tokens are the same
 /// ones); what changes is only when the bytes arrive: the copies go in layer order and the verify window holds a layer's
 /// plan back until that layer's copies have landed (AdaptGate in strata/core/verify.hpp).  The ~10 ms a 96-swap round
-/// took at the next window's start (PCIe 3.0 x16, Q2_0) is then hidden behind the window.  On for CUDA (=0 turns it off), opt-in on HIP.
+/// took at the next window's start (PCIe 3.0 x16, Q2_0) is then hidden behind the window.  Opt-in on every backend
+/// (=1 turns it on); the startup log names the state, and why when it cannot run.
 bool adapt_overlap() {
     static const bool v = [] {
         const char* e = std::getenv("STRATA_ADAPT_OVERLAP");
-#if defined(STRATA_USE_HIP)
-        return e && e[0] == '1';      // HIP: not measured yet, opt-in
-#elif defined(_WIN32)
-        return e && e[0] == '1';      // Windows CUDA: opt-in (RTX 5070, Q2_0: -2.6% story decode with it, IQ3_XXS neutral)
-#else
-        return !(e && e[0] == '0');   // Linux CUDA: on since 0.1.43 (same tokens, +5.5..8.3% decode on an A4000, +4.4% P100); =0 turns it off
-#endif
+        // Opt-in on every backend (#2010).  Windows CUDA since 0.1.43: an RTX 5070 decoded Q2_0 2.6% slower with it
+        // (story decode, -2.1% code), IQ3_XXS no faster.  Linux CUDA was on by default from 0.1.43 (same tokens, +5.5..8.3%
+        // decode on an A4000, +4.4% on a P100) until an RTX 5090 Laptop (WSL2, Core Ultra 9 275HX, native IQ3_XXS pack,
+        // --expert-cache-per-layer) decoded 21% slower with it: 84.6 vs 106.6 tok/s medians of 5 generations of 256
+        // tokens from one build, the slowest of the fast run above the fastest of the slow one.
+        return e && e[0] == '1';
     }();
     return v;
 }
@@ -9223,8 +9223,10 @@ int main(int argc, char** argv) {
         bool aflipped = false;   // the pending swaps are in the tables and their copies may still be landing
         bool aov = false;
         int64_t aov_flips = 0;
-        if (adapt_overlap()) {
-            const char* why = multi_gpu || !stages.empty() ? "not on a layer split"
+        // #2010: the overlap is opt-in on every backend now, so the off state is the default and has to be visible too.
+        // The predicates are side-effect free, so they are read in both states: they name why it could not run.
+        const bool aov_want = adapt_overlap();
+        const char* aov_why = multi_gpu || !stages.empty() ? "not on a layer split"
                               : peer.valid() ? "not with --peer-device"
                               : remote_opt ? "not with --remote-expert-opt"
                               : o.adapt_async ? "not with --adapt-async"
@@ -9239,19 +9241,22 @@ int main(int argc, char** argv) {
                                     ? "not in the resident RAM mode unless STRATA_ADAPT_OVERLAP_RESIDENT=1"
                               : drive.d.usage.empty() ? "the adaptive tier is off"
                               : nullptr;
-            if (why == nullptr) {
+        if (aov_want) {
+            if (aov_why == nullptr) {
                 agate.ticks.resize((size_t) g.n_layers + 1);
                 for (int64_t l = 0; l <= g.n_layers; ++l) agate.ticks[(size_t) l] = {&agate, (int32_t) l};
                 agate.has.assign((size_t) g.n_layers, 0);
-                if (!ver.set_adapt_gate(&agate)) why = "the device-planned layers (STRATA_VERIFY_DEVICE_PLAN) are on";
+                if (!ver.set_adapt_gate(&agate)) aov_why = "the device-planned layers (STRATA_VERIFY_DEVICE_PLAN) are on";
             }
-            aov = why == nullptr;
+            aov = aov_why == nullptr;
             if (aov)
                 std::fprintf(stderr, "strata serve: adaptive overlap (STRATA_ADAPT_OVERLAP=0 turns it off): the adaptive tier's copies land while the next window runs "
                                      "(same tokens, a layer waits for its own copies)\n");
-            else if (std::getenv("STRATA_ADAPT_OVERLAP") != nullptr)   // quiet when it was only the default
-                std::fprintf(stderr, "strata serve: STRATA_ADAPT_OVERLAP=1 is off: %s\n", why);
-        }
+            else if (std::getenv("STRATA_ADAPT_OVERLAP") != nullptr)   // the env var was set: say what stopped it
+                std::fprintf(stderr, "strata serve: STRATA_ADAPT_OVERLAP=1 is off: %s\n", aov_why);
+        } else
+            std::fprintf(stderr, "strata serve: adaptive overlap: off%s%s\n",
+                         aov_why ? ": " : " (STRATA_ADAPT_OVERLAP=1 turns it on)", aov_why);
         // a layer split's later stages keep a copy of the residency table on their devices, and swap on their own
         auto res_upload = [&]() {
             if (d_res != nullptr)
