@@ -739,8 +739,9 @@ class PoolManager:
                     eng.unload()
                 self.svc.pool_role = role
                 if hasattr(eng, "spawn"):
-                    exe, _, cwd, log, _ = eng.spawn
-                    eng.spawn = (exe, self.engine_args(), cwd, log, self.engine_env())
+                    sp = list(eng.spawn)   # (exe, args, cwd, log, env, ...): the rest kept as it is
+                    sp[1], sp[4] = self.engine_args(), self.engine_env()
+                    eng.spawn = tuple(sp)
             if role == "worker":
                 self.applying = None
                 self.echo("[pool] this PC is now a pool worker: the chat here is off; the coordinator uses its GPU")
