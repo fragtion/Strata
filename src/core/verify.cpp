@@ -2202,7 +2202,7 @@ bool Verifier::prelaunch(int T, const int32_t* tokens, int64_t pos0, std::string
 bool Verifier::adapt_gate_wait(int32_t layer, std::string& err) {
     const Clock::time_point t0 = Clock::now();
     uint32_t spins = 0;
-    while (adapt_gate_->landed.load(std::memory_order_acquire) < layer) {
+    while (adapt_gate_->reached() < layer) {
         _mm_pause();
         if ((++spins & 1023u) != 0) continue;
         if (Clock::now() - t0 > std::chrono::seconds(20)) {
