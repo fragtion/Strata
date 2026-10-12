@@ -24,7 +24,7 @@ def source_hash(parts) -> str:
 def main() -> int:
     eng = ROOT / (sys.argv[3] if len(sys.argv) > 3 else "engine")
     exe = eng / ("strata.exe" if (eng / "strata.exe").exists() else "strata")
-    m = re.search(rb"engine=(\d+\.\d+\.\d+)\n", Path(exe).read_bytes())
+    m = re.search(rb"engine=(\d+\.\d+\.\d+(?:\.\d+)?)\n", Path(exe).read_bytes())   # setup.py's pattern: 0.1.43.1 too
     if not m:
         print("no engine= version string in the exe"); return 1
     nvcc = sys.argv[1]  # path to nvcc.exe, for cuda_dirs
