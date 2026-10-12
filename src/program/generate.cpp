@@ -2222,6 +2222,7 @@ int main(int argc, char** argv) {
     const bool pool_worker = !o.pool_listen.empty();
     const bool pool_any = pool_coord || pool_worker;
     bool pool_wide_rows = false;   // --batch-mtp in a pool: batch windows carry each slot's draft row (CONFIG batch_mtp)
+    int pool_tail_skip = -1;       // a worker: the coordinator's explicit STRATA_ROUTE_TAIL_SKIP (CONFIG tail_skip; -1: none)
     strata::pool::Wire pool_wire = strata::pool::Wire::F32, pool_draft_wire = strata::pool::Wire::F16;
     if (o.pool_secret.empty())
         if (const char* v = std::getenv("STRATA_POOL_SECRET")) o.pool_secret = v;
@@ -3297,6 +3298,7 @@ int main(int argc, char** argv) {
         o.spec = (int) pool_cfg.i64("spec", o.spec);
         o.batch = (int) std::clamp<int64_t>(pool_cfg.i64("batch", 0), 0, strata::kernels::kVerifyMaxT);   // slot sessions
         pool_wide_rows = pool_cfg.i64("batch_mtp", 0) != 0;   // --batch-mtp: a slot's rows carry its draft too
+        pool_tail_skip = (int) pool_cfg.i64("tail_skip", -1);
         o.prefill_chunk = pool_cfg.i64("prefill_chunk", o.prefill_chunk);
         o.prefill_auto = pool_cfg.i64("prefill_auto", o.prefill_auto ? 1 : 0) != 0;
         {
@@ -3522,6 +3524,10 @@ int main(int argc, char** argv) {
         }
         common.set("prefill_chunk", o.prefill_chunk);
         common.set("prefill_auto", (int64_t) (o.prefill_auto ? 1 : 0));
+        {   // STRATA_ROUTE_TAIL_SKIP set on this PC: every worker's layers skip as this PC's do (-1: each PC's own default)
+            const char* ts = std::getenv("STRATA_ROUTE_TAIL_SKIP");
+            common.set("tail_skip", (int64_t) (ts != nullptr && ts[0] != '\0' ? std::max(0, std::atoi(ts)) : -1));
+        }
         common.set("rope_type", (int64_t) rope_cfg.type);
         common.set("rope_freq_base", rope_cfg.freq_base);
         common.set("rope_factor", rope_cfg.factor);
@@ -7591,12 +7597,13 @@ int main(int argc, char** argv) {
         }
 #endif
         const bool share_pool = o.batch <= 0 && !o.no_pool;
-        bool share_has_work = strata::prefill::share_rules::default_share_has_work(
-            (int64_t) xcache.slots(), (int64_t) (g.n_layers * g.n_expert));   // #1595
+        // #1595; POOL: a node serves only its own layers' experts
+        const int64_t share_experts = (int64_t) ((pool_any ? node_le - node_lb : g.n_layers) * g.n_expert);
+        bool share_has_work = strata::prefill::share_rules::default_share_has_work((int64_t) xcache.slots(), share_experts);
         if (!share_has_work)
             std::fprintf(stderr, "strata serve: every expert is in the GPU cache (%lld of %lld): the CPU prefill share has "
                                  "nothing to take, so it is not armed by default (STRATA_PREFILL_CPU_SHARE=auto forces it)\n",
-                         (long long) xcache.slots(), (long long) (g.n_layers * g.n_expert));
+                         (long long) xcache.slots(), (long long) share_experts);
         if (share_pool && stages.empty() && !multi_gpu && share_has_work && !share_default_ok()) share_has_work = false;   // H11
         strata::prefill::Prefill::arm_cpu_share(share_pool, share_pool && stages.empty() && !multi_gpu && share_has_work);
         void* borrow = nullptr;
@@ -9132,8 +9139,12 @@ int main(int argc, char** argv) {
             ~FsDetach() { la->set_foresight(nullptr); }
         } fs_detach{&lookahead};
         drive.d.pcie_num = std::max(0, std::min(256, (int) (o.pcie_frac * 256.0 + 0.5)));
-        const bool all_experts_resident = !host_res.empty() &&
-            std::all_of(host_res.begin(), host_res.end(), [](int32_t r) { return r >= 0; });
+        // POOL: a node's residency table covers every layer, but it serves only [node_lb, node_le): its own layers count
+        const size_t own_b = pool_any ? (size_t) node_lb * (size_t) g.n_expert : 0;
+        const size_t own_e = pool_any ? std::min(host_res.size(), (size_t) node_le * (size_t) g.n_expert) : host_res.size();
+        const bool all_experts_resident = !host_res.empty() && own_b < own_e &&
+            std::all_of(host_res.begin() + (std::ptrdiff_t) own_b, host_res.begin() + (std::ptrdiff_t) own_e,
+                        [](int32_t r) { return r >= 0; });
         // STRATA_ROUTE_TAIL_SKIP: ON BY DEFAULT on CUDA builds (owner decision, 0.1.42) and on HIP gfx1200/gfx1201 (0.1.43): a missed expert that every token of
         // a verify window routes at rank 7 or lower is neither copied nor computed (answers differ slightly from 0.1.41,
         // KL ~0.003-0.006; docs/DETAILS.md).  =0 restores 0.1.41's bytes.  Nothing to do, so no default and no line, when every
@@ -9141,10 +9152,14 @@ int main(int argc, char** argv) {
         // another's tokens) and, as in the dispatch, with a peer or helper GPU.  A layer split is fine: each stage skips by itself.
         {
             const char* tse = std::getenv("STRATA_ROUTE_TAIL_SKIP");
+            // POOL: a worker takes the coordinator's explicit setting, so the whole model skips as one PC's would
+            const bool from_coord = pool_worker && tse == nullptr && pool_tail_skip >= 0;
+            if (from_coord) strata::core::set_tail_skip_rank(pool_tail_skip);
             // #1884: with nearly every expert in the GPU cache (V100 32 GB, Coder IQ1_M: 94.8% of the experts, 99.9% decode hits) the few
             // misses are cheap and the skip costs more draft acceptance (70.1% -> 68.2%) than it saves: -1..2% decode.  No default then.
             size_t cached_experts = 0;
-            for (int32_t r : host_res) cached_experts += r >= 0 ? 1 : 0;
+            for (size_t i = own_b; i < own_e; ++i) cached_experts += host_res[i] >= 0 ? 1 : 0;
+            const size_t own_n = own_e > own_b ? own_e - own_b : 0;
             // (STRATA_TAIL_SKIP_MAX_CACHED=<percent>, default 90, moves the line; 101 = never).  0.1.43: 60 on a HIP layer split, where
             // 2x R9700 (5 pairs, skip on vs off): Q2_0 story -6.2% at 70% cached, -1.8% at 60%; IQ3_S +6..15% at 44-52%, about 0 at 60%.
 #if defined(STRATA_USE_HIP)
@@ -9154,21 +9169,21 @@ int main(int argc, char** argv) {
 #endif
             const char* mcs = std::getenv("STRATA_TAIL_SKIP_MAX_CACHED");
             const double max_cached = mcs != nullptr && mcs[0] != 0 ? std::atof(mcs) / 100.0 : max_cached_default;
-            const bool nearly_all_cached = !host_res.empty() && !all_experts_resident &&
-                                           (double) cached_experts >= max_cached * (double) host_res.size();
-            const bool tail_default_ok = tse == nullptr && !all_experts_resident && !nearly_all_cached && o.batch == 0 &&
+            const bool nearly_all_cached = own_n > 0 && !all_experts_resident &&
+                                           (double) cached_experts >= max_cached * (double) own_n;
+            const bool tail_default_ok = tse == nullptr && !from_coord && !all_experts_resident && !nearly_all_cached && o.batch == 0 &&
                                          decode_defaults_arch_ok() &&
                                          o.peer_device < 0;
-            if (tse == nullptr && nearly_all_cached && o.batch == 0 && o.peer_device < 0 && decode_defaults_arch_ok())
+            if (tse == nullptr && !from_coord && nearly_all_cached && o.batch == 0 && o.peer_device < 0 && decode_defaults_arch_ok())
                 std::fprintf(stderr, "strata serve: STRATA_ROUTE_TAIL_SKIP is off by default: %.1f%% of the experts are in the GPU cache, so "
                                      "few are missed and skipping them costs more draft acceptance than it saves; "
-                                     "STRATA_ROUTE_TAIL_SKIP=7 turns it on\n", 100.0 * (double) cached_experts / (double) host_res.size());
+                                     "STRATA_ROUTE_TAIL_SKIP=7 turns it on\n", 100.0 * (double) cached_experts / (double) own_n);
             if (tail_default_ok) strata::core::set_tail_skip_rank(7);
             if (strata::core::tail_skip_rank() > 0 && !all_experts_resident)
                 std::fprintf(stderr, "strata serve: STRATA_ROUTE_TAIL_SKIP=%d is ON%s: a missed expert that every token of a verify window routes at rank %d or "
                                      "lower is skipped (+10..20%% decode on 12-16 GB cards that miss experts, answers differ slightly from 0.1.41); "
                                      "STRATA_ROUTE_TAIL_SKIP=0 turns it off\n", strata::core::tail_skip_rank(),
-                             tse == nullptr ? " (default)" : "", strata::core::tail_skip_rank());
+                             from_coord ? " (the coordinator's)" : tse == nullptr ? " (default)" : "", strata::core::tail_skip_rank());
         }
         if (o.adapt_every > 0 && o.adapt_swaps > 0 && !all_experts_resident)
             drive.d.usage.assign((size_t) (g.n_layers * g.n_expert), 0.0f);
