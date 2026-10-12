@@ -1718,7 +1718,7 @@ double pcie_frac_for_gbps(double gbps, double base) {
 // server start in four read `all` as the faster layout (6.6 ms against 8.6), where the others read it 2.4 to 4 times
 // slower.
 strata::kernels::cpu::PoolAffinity measure_pool_affinity(strata::core::ExpertSource* src, int workers, bool host_works,
-                                                         int tasks) {
+                                                         int tasks, int64_t lb = 0, int64_t le = -1) {
     namespace cpu = strata::kernels::cpu;
     using Clock = std::chrono::steady_clock;
     const cpu::ExpertLayout& lay = cpu::expert_layout();
@@ -1729,10 +1729,13 @@ strata::kernels::cpu::PoolAffinity measure_pool_affinity(strata::core::ExpertSou
     }
     constexpr int kExperts = 2, kTok = 4, kRounds = 10, kBlocks = 3;
     const int64_t nl = lay.n_layers;
+    // POOL: a node holds only its own layers' experts, [lb, le): those are timed
+    if (le < 0 || le > nl) le = nl;
+    if (lb < 0 || lb >= le) lb = 0;
     std::vector<const uint8_t*> blobs((size_t) nl * kExperts, nullptr);
     bool have = src != nullptr && lay.native && (int64_t) lay.fmt.size() >= nl && nl > 0;
     uint32_t seed = 12345u;
-    for (int64_t l = 0; have && l < nl; ++l)
+    for (int64_t l = lb; have && l < le; ++l)
         for (int j = 0; j < kExperts; ++j) {
             seed = seed * 1664525u + 1013904223u;
             const uint8_t* b = src->blob(l, (int64_t) ((seed >> 8) % (uint32_t) lay.n_expert));
@@ -1747,7 +1750,7 @@ strata::kernels::cpu::PoolAffinity measure_pool_affinity(strata::core::ExpertSou
     std::vector<uint8_t> nact((size_t) nl * kTok * cpu::kNativeActBytes);
     std::vector<cpu::ActQ> qact((size_t) nl * kTok);
     std::vector<float> x((size_t) cpu::H), out((size_t) kExperts * kTok * cpu::H);
-    for (int64_t l = 0; l < nl; ++l)
+    for (int64_t l = lb; l < le; ++l)
         for (int t = 0; t < kTok; ++t) {
             for (int i = 0; i < cpu::H; ++i) x[(size_t) i] = std::sin((float) (i + 13 * t + 7 * (int) l) * 0.031f);
             const size_t at = (size_t) l * kTok + (size_t) t;
@@ -1764,7 +1767,7 @@ strata::kernels::cpu::PoolAffinity measure_pool_affinity(strata::core::ExpertSou
         cpu::ExpertJobMulti jobs[kExperts];
         double ms = 0.0;
         for (int r = -1; r < kRounds; ++r)   // round -1 is not timed: the workers start and the rows are touched
-            for (int64_t l = 0; l < nl; ++l) {
+            for (int64_t l = lb; l < le; ++l) {
                 for (int j = 0; j < kExperts; ++j) {
                     jobs[j].blob = blobs[(size_t) l * kExperts + (size_t) j];
                     jobs[j].nt = kTok;
@@ -5481,7 +5484,8 @@ int main(int argc, char** argv) {
         srcp = &arena_src;
     }
     if (o.pool_measure)
-        o.pool_affinity = measure_pool_affinity(srcp, o.pool_workers, !o.no_host_worker, o.pool_tasks);
+        o.pool_affinity = measure_pool_affinity(srcp, o.pool_workers, !o.no_host_worker, o.pool_tasks,
+                                                pool_any ? node_lb : 0, pool_any ? node_le : -1);
     strata::kernels::cpu::ExpertPool pool(o.pool_workers, /*pin=*/true, /*host_works=*/!o.no_host_worker,
                                         o.pool_affinity, o.pool_tasks);
     std::fprintf(stderr, "strata generate: CPU pool tasks/phase: %d%s, participating threads: %d\n",
