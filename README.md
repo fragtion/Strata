@@ -151,7 +151,8 @@ asks the same questions as Strata's and finds the models an existing Strata inst
 The first start compiles StrataPool's engine (10-20 minutes, once; setup installs the compiler and the CUDA toolkit
 itself), because Strata's ready-made engines do not include the layer split. Share requests works with any engine.
 
-Then run `POOL-FIREWALL.bat` as administrator on each PC, open the app's **Pool** tab and pick a mode. The steps for
+Then run `POOL-FIREWALL.bat` as administrator on each PC (and `POOL-INTEGRITY.bat` after each new engine, see
+[large pages](docs/POOL.md#windows-large-pages-and-the-low-integrity-label)), open the app's **Pool** tab and pick a mode. The steps for
 each mode, every setting, what each PC holds and what is not supported yet: **[docs/POOL.md](docs/POOL.md)**.
 `POOL-SELFTEST.bat` checks the whole split on one PC first.
 

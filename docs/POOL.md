@@ -122,6 +122,18 @@ between 75% of its maximum and the maximum and the memory clock at its maximum t
 `pool_bench` with and without it. A laptop GPU or driver may refuse the memory lock (it says so); the graphics lock is
 the one that matters most.
 
+### Windows: large pages and the Low integrity label
+
+Windows starts a program at the lower of its parent's integrity and its file's mandatory label. A folder shared with a
+sandbox (Claude's Cowork, some sync tools) can carry a **Low** label that every file created in it inherits, and an
+engine running at Low has "Lock pages in memory" taken out of its token: large pages fail with error 1314, and the
+working-set lock that lets Windows pin more of the experts fails too. `POOL-INTEGRITY.bat` (as administrator, on each
+PC) relabels `engine\*.exe`, the `.venv`'s Python and the Python that venv runs to Medium, the same for a Strata
+install next to the folder (`..\strata`) and any venv, folder or `.exe` named on its command line; removes the
+downloaded-file mark from an engine copied from another PC; and says whether the account holds "Lock pages in memory"
+(granted in `secpol.msc`, effective at the next logon). A rebuilt or copied `strata.exe` takes the folder's label again,
+so run it after each one. The folders themselves are left alone.
+
 ## Testing it on one PC first
 
 `POOL-SELFTEST.bat` checks the whole pool path on a single PC. Close Strata first, so the GPU is free.
