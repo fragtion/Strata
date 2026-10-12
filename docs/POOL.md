@@ -111,6 +111,17 @@ Then chat on the coordinator, or point your apps at it, as before (`http://<coor
 
 With more than one worker, the order in the Workers table is the layer order. Use the arrows to change it.
 
+### Windows: keep the GPUs at full clocks
+
+In a split every PC's GPU waits while the other PCs run their layers, and the Windows driver lowers its clocks in those
+gaps (the Linux driver does not). In Strata PR #1748, which runs a layer split across PCs too, a worker RTX 3070 spent
+94% of a decode run below full clocks and its part of a window took 12-22 ms instead of 3.7-4.1 ms, decode 33.8
+against 41.8 tok/s with its clocks locked. `POOL-CLOCKS.bat` (as administrator, on each PC) holds the graphics clock
+between 75% of its maximum and the maximum and the memory clock at its maximum through `nvidia-smi -lgc` / `-lmc`;
+`POOL-CLOCKS.bat reset` gives them back to the driver, as a reboot does. Not measured on StrataPool's own PCs yet: run
+`pool_bench` with and without it. A laptop GPU or driver may refuse the memory lock (it says so); the graphics lock is
+the one that matters most.
+
 ## Testing it on one PC first
 
 `POOL-SELFTEST.bat` checks the whole pool path on a single PC. Close Strata first, so the GPU is free.
