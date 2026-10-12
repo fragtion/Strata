@@ -223,6 +223,9 @@ add_library(strata_warnings INTERFACE)
 target_compile_options(strata_warnings INTERFACE
   $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/W4>
   $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/utf-8>
+  # StrataPool: generate.cpp (the pool's coordinator and worker on top of Strata's) can pass MSVC's 65,279 sections
+  # per object file (C1128); /bigobj lifts that limit and changes nothing else
+  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/bigobj>
   $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Wall>
   $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Wextra>
   $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CXX_COMPILER_ID:MSVC>>:-Xcompiler=/W4>
@@ -617,6 +620,9 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
   add_executable(strata src/program/generate.cpp src/pool/link.cpp)
   target_include_directories(strata PRIVATE ${_strata_gpu_include_directories})
   target_link_libraries(strata PRIVATE strata_engine strata_prefill strata_spec strata_pool ${_strata_gpu_runtime_target})
+  if(MSVC)   # StrataPool: generate.cpp's object passes the default section limit (C1128)
+    target_compile_options(strata PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
+  endif()
 
   if(STRATA_ENABLE_HIP)
     enable_testing()
