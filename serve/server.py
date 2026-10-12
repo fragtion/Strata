@@ -6440,6 +6440,7 @@ def main() -> int:
         except ValueError as e:
             raise SystemExit(f"[strata] config {e}")
         base_args = base_args + (effort_end or [])
+        groups = []                                     # replicas' card groups: none on a pool PC (one engine each)
         if pc.role == "worker":
             # the chat engine stays off: the worker engine (serve/pool.py) runs the layers a coordinator assigns
             print(f"[pool] this PC is a pool worker: it lends its GPU to a coordinator (port {pc['worker_port']})",
