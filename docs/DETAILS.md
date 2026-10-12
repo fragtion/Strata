@@ -282,6 +282,14 @@ Windows 11, Swift 1.5 IQ3_XXS at 128K):**
   MiB free. A run that filled the card to
   0 MiB free decoded 80-115 tok/s where the same text ran at 205-230 with 900 MiB or more free. Not measured: AMD
   cards, Linux (the switch is compiled for Windows CUDA builds only).
+- `--pool-affinity measure` (hybrid CPUs, native packs): the `all` and `p-cores` layouts are timed at start on the
+  pack's own experts (about a second) and the faster one is taken. Engine 0.1.41 built from source, the same prompt:
+  `all` (15 workers) spent 6.7 ms per verify window in the CPU pool and decoded 148 tok/s, `p-cores` (7 workers) 2.2 ms
+  and 188-191 tok/s; in another run of the same day `all` took 2.4 ms, so the difference comes and goes. The
+  measurement is taken once, at start: over four server starts of one day it read `all` at 14.8, 21.9 and 25.3 ms
+  against 6.1 to 6.2 ms for `p-cores` and took `p-cores`, and once read `all` at 6.6 ms against 8.6 ms and took `all`.
+  It does not look again during a session, so where the E-cores' speed changes while the engine runs,
+  `--pool-affinity p-cores` is the steady choice. Not measured: other CPUs, Linux, AMD cards.
 
 **Switches added in 0.1.40 (all off unless noted; none changes the default output):**
 - `--kv-grow` (or `STRATA_KV_GROW=1`; `--no-kv-grow` turns it off): the K/V takes VRAM only for the cells the requests
