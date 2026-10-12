@@ -2682,11 +2682,19 @@ int main(int argc, char** argv) {
     strata::core::qsa_set_kv_resident(o.kv_resident);
     // The prompt-path helper (layer split) reads its switch from the environment once, when the first Prefill is
     // built; --prefill-help* set it here so the flags work wherever the env did.  STRATA_PREFILL_HELP stays honoured.
-    if (o.prefill_help) setenv("STRATA_PREFILL_HELP", "1", 1);
+    // (Windows has no setenv: _putenv_s, as the --gpu code above does)
+    auto set_env = [](const char* k, const char* v) {
+#if defined(_WIN32)
+        _putenv_s(k, v);
+#else
+        setenv(k, v, 1);
+#endif
+    };
+    if (o.prefill_help) set_env("STRATA_PREFILL_HELP", "1");
     if (o.prefill_help_frac >= 0.0 && o.prefill_help_frac <= 1.0) {
         char fb[32];
         std::snprintf(fb, sizeof fb, "%g", o.prefill_help_frac);
-        setenv("STRATA_PREFILL_HELP_FRAC", fb, 1);
+        set_env("STRATA_PREFILL_HELP_FRAC", fb);
     }
 
     // Prompt lookup (the suffix drafter, on by default): the MTP keeps its --spec windows and a lookup window may be
