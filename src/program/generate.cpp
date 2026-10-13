@@ -12484,6 +12484,17 @@ int main(int argc, char** argv) {
                 }
             }
             int64_t reread_to = -1;   // STRATA_CKPT_REREAD only: read [0, reread_to) again instead of restoring
+            // POOL: a checkpoint the workers hold no part of (none kept, or one lost) cannot be mounted on every node:
+            // the prompt is read from the start instead of ending the engine
+            if (pool_coord && resume > 0 && !from_live) {
+                const ConvCheckpoint* pc = nullptr;
+                for (const ConvCheckpoint& k : checks) if ((int64_t) k.ids.size() == resume) pc = &k;
+                if (pc == nullptr || pc->pool_id == 0) {
+                    std::fprintf(stderr, "strata pool: the checkpoint at %lld tokens has no part on the workers; reading "
+                                         "the prompt from the start\n", (long long) resume);
+                    resume = 0;
+                }
+            }
             if (resume == 0) {
                 strata::core::session_zero(ss, g, nullptr, main_cs);
                 cudaStreamSynchronize(main_stream);
@@ -12532,6 +12543,8 @@ int main(int argc, char** argv) {
                            }() ||
                            (pool_coord && (c->pool_id == 0 || !pool_link.ckpt_restore(c->pool_id, err)))) {
                     if (pool_coord && !err.empty()) std::fprintf(stderr, "strata pool: %s\n", err.c_str());
+                    std::fprintf(stderr, "strata serve: restoring the conversation checkpoint at %lld tokens failed%s\n",
+                                 (long long) resume, c == nullptr ? " (none at that length)" : "");
                     std::printf("ERR restoring a conversation checkpoint failed\n");
                     return 1;
                 }
