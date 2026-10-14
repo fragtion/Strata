@@ -3177,6 +3177,9 @@ def build_image_engine(backend: str, gpu: dict) -> tuple[Path, list[str]]:
     say(f"  Compiling the image generator (stable-diffusion.cpp {QI.SD_CPP_COMMIT[:7]}, {backend}; 5-20 minutes, "
         "once) ...")
     bdir = ROOT / f"build-image-{backend}"
+    if WIN:   # CMake's compiler probe uses the Debug flags (/Zi /RTC1), which some process monitors refuse (D8050)
+        defs += ["-DCMAKE_C_FLAGS_DEBUG=-MDd", "-DCMAKE_CXX_FLAGS_DEBUG=-MDd"] + \
+            (["-DCMAKE_CUDA_FLAGS_DEBUG=-Xcompiler=-MDd"] if backend == "cuda" else [])
     cmake_build(src, bdir, "sd-cli", defs, vcvars, f"build-image-{backend}.bat" if WIN else "")
     built = bdir / "bin" / QI.SD_EXE
     if not built.exists():
