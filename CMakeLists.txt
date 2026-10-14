@@ -16,7 +16,7 @@ if(WIN32)
   set(CMAKE_C_FLAGS_DEBUG "-MDd" CACHE STRING "")
   set(CMAKE_CXX_FLAGS_DEBUG "-MDd" CACHE STRING "")
 endif()
-project(strata VERSION 0.1.44 LANGUAGES CXX)
+project(strata VERSION 0.1.44.1 LANGUAGES CXX)
 # EXPERIMENTAL: the Intel Arc engine, the SYCL port in sycl/ (PR #423; icpx + oneMKL, docs/INTEL_ARC.md). It is its
 # own project that takes the unported sources from src/; with this on, nothing below is configured.
 option(STRATA_ENABLE_SYCL "EXPERIMENTAL: build the Intel Arc (SYCL) engine from sycl/ - docs/INTEL_ARC.md" OFF)
