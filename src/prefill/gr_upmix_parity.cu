@@ -208,6 +208,14 @@ void bench(strata::prefill::Gemm& gm, cudaStream_t st, float* gated, int64_t T) 
 }  // namespace
 
 int main(int argc, char** argv) {
+    {   // the fused read is sm_80+ (cp.async, BF16 mma): an older card has nothing to compare
+        int dev = 0, major = 0;
+        if (cudaGetDevice(&dev) != cudaSuccess || cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, dev) != cudaSuccess) {
+            std::printf("gr_upmix_parity: no CUDA device, skipped\n");
+            return 77;
+        }
+        if (major < 8) { std::printf("gr_upmix_parity: sm_%d0, the fused read needs sm_80+: skipped\n", major); return 77; }
+    }
     const bool do_bench = argc > 1 && std::string(argv[1]) == "--bench";
     cudaStream_t st = nullptr;
     if (!ck(cudaStreamCreate(&st), "stream")) return 1;

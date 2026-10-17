@@ -25,6 +25,12 @@ bool conversation_kv_validate(const ConversationKv& image, const QsaState& state
                               int64_t upto, bool include_index, std::string& error);
 bool conversation_kv_restore(const ConversationKv& image, const QsaState& state, const ModelGeometry& g,
                              int64_t upto, bool include_index, std::string& error);
+// conversation_kv_save(from) + conversation_kv_restore(to) without a host image, for two states of the same layout.
+// The copies are complete on return; the residency refresh is queued on the legacy stream like the restore's.
+// `queued`: the copies are only queued on the private copy stream, the refresh is ordered after them on the device,
+// and the caller synchronizes the device before it reads or writes either state.
+bool conversation_kv_copy(const QsaState& from, const QsaState& to, const ModelGeometry& g,
+                          int64_t upto, bool include_index, std::string& error, bool queued = false);
 // The first `upto` tokens of an image captured at `captured` tokens: the leading bytes of each buffer (cells come
 // first in the identity layout, as conversation_kv_save takes them), the image untouched.  Cells and indexer rows
 // past `upto` in the restored pages hold the image's later tokens until a request writes them, as after a whole
@@ -66,6 +72,11 @@ bool conversation_checkpoint_save(ConversationCheckpoint& checkpoint, const Sess
                                   const ModelGeometry& g, std::string& error);
 bool conversation_checkpoint_restore(const ConversationCheckpoint& checkpoint, SessionState& session,
                                      const ModelGeometry& g, std::string& error);
+// conversation_checkpoint_save(from) + conversation_checkpoint_restore(to) of `ids` without a host image, for two
+// sessions carved alike on the same device; the caller synchronizes the device before (as for the restore).
+// `queued`: the copies are only queued (the private copy stream), and the caller synchronizes the device after too.
+bool conversation_checkpoint_copy(const SessionState& from, SessionState& to, const std::vector<int32_t>& ids,
+                                  const ModelGeometry& g, std::string& error, bool queued = false);
 
 struct ConversationView {
     const std::vector<int32_t>& ids;
