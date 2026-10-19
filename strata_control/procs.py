@@ -74,7 +74,8 @@ def start_token(pid: int) -> str | None:
                              timeout=5).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
-    return None if not out or out.endswith("Z") else "s:" + out
+    parts = out.rsplit(None, 1)   # "<start time> <state>": only the start names the process (the state goes R -> S)
+    return None if len(parts) < 2 or parts[1].startswith("Z") else "s:" + parts[0]
 
 
 def command_line(pid: int) -> list[str] | None:
