@@ -192,7 +192,14 @@ def run(a: argparse.Namespace) -> int:
         try:
             from strata_cli.launch.monitor_ext import LaunchMonitor
         except ImportError:
-            return _error("monitor component missing; install the optional terminal UI dependency", 5, machine)
+            # the portable monitor bundle carries the read-only client only (no launch/Connect view): run the plain Monitor
+            try:
+                from strata_cli.monitor import MonitorApp
+            except ImportError:
+                return _error("monitor component missing; install the optional terminal UI dependency", 5, machine)
+            MonitorApp(endpoint, None, interval=a.interval, requests=a.requests,
+                       theme=a.theme, color=a.color, glyphs=a.glyphs).run()
+            return 0
         # the one monitor, with the same seven views as the one `strata launch` opens (Connect is key 7 and works against this --url
         # server); q just detaches here: nothing was started by this command, so there is nothing to stop
         LaunchMonitor(endpoint, None, info={"url": endpoint.base_url, "urls": [endpoint.base_url], "key": endpoint.credential or "", "model": "",

@@ -6,7 +6,7 @@ RX 9070 / 9070 XT / Radeon AI PRO R9700 (RDNA4, gfx1201; see [RDNA4](#rdna4-gfx1
 (gfx1101) and the RX 9060 XT (gfx1200) were validated by their owners (see [Community-validated
 cards](#community-validated-cards)); the RX 6800 / 6900 series (RDNA2, gfx1030) builds and runs too, reported by a community machine and not yet validated by the maintainers (see [RDNA2](#rdna2-gfx1030)). Setup chooses it by itself on a PC with no NVIDIA card Strata can use (`--backend hip` on a PC with both); the
 install steps for users are in [INSTALL.md](INSTALL.md#amd-cards). gfx906 (Instinct MI50 / MI60, Radeon VII; wave64) has a separate
-opt-in build, see [gfx906](#gfx906-instinct-mi50--mi60-radeon-vii-wave64-built-from-source). The Ryzen AI Max "Strix Halo" APU (gfx1151, RDNA3.5, unified memory) is built from source on Linux: see [STRIX_HALO.md](STRIX_HALO.md). Other AMD architectures and mixed
+opt-in build, see [gfx906](#gfx906-instinct-mi50--mi60-radeon-vii-wave64-built-from-source). The Ryzen AI Max "Strix Halo" APU (gfx1151, RDNA3.5, unified memory) has its own page: [STRIX_HALO.md](STRIX_HALO.md). The ready-made 0.2.0 installers and engine packages for AMD cards are listed in [Ready-made packages](#ready-made-packages-020). Other AMD architectures and mixed
 AMD/NVIDIA execution in one run are not supported.
 
 The backend maps the CUDA-shaped runtime and BLAS calls to HIP/hipBLAS, uses
@@ -63,6 +63,46 @@ the kernel's amdgpu driver (no ROCm install needed):
 
 The rest of setup is the same as on NVIDIA: the model download, the start script, the server.
 
+## Ready-made packages (0.2.0)
+
+The 0.2.0-beta release carries one AMD engine package per card family. The Terminal one-liner and `strata update` pick the package whose
+GPU code covers the card; the full installers carry one package each. Any app installer also works: install it, press **Update engine**
+in Settings (or run `strata update`) and the matching package downloads.
+
+| Package (variant) | OS | GPU code inside | ROCm | Installer |
+| --- | --- | --- | --- | --- |
+| `rx9070` | Windows | gfx1200, gfx1201 | 10.2.0a20260930 (TheRock) | `Strata-0.2.0-beta-windows-hip.exe` |
+| `rdna3` | Windows | gfx1100, gfx1101, gfx1102, gfx1151 | 10.2.0a20260930 | `Strata-0.2.0-beta-windows-hip-rdna3.exe` |
+| `rx9070` | Linux | gfx1200, gfx1201 | 7.10.0a20251120 (`gfx120X-all` wheels) | `Strata-0.2.0-beta-linux-amd-rx9070.AppImage` |
+| `rx7900` | Linux | gfx1100, gfx1101, gfx1102 | 7.10.0a20251120 (`gfx110X-dgpu` wheels) | `Strata-0.2.0-beta-linux-amd-rx7900.AppImage` |
+| `halo` | Linux | gfx1151 | 7.14.1 (TheRock) | `Strata-0.2.0-beta-linux-amd-strixhalo.AppImage` |
+
+`rdna3` and `halo` were added to the release after the first upload (feed sequence 101). Why the split: on Windows one ROCm 10.2 library
+set holds the kernels of every listed architecture, so RX 7000 and Strix Halo share a package. The Linux 7.10 wheels hold one chip family
+per library set, and 7.10 crashes in the HSA runtime on a Strix Halo with a new kernel (#1267), so Linux Strix Halo has its own package on 7.14.1.
+
+Each package carries the engine, the CPU picture reader and the GPU picture reader (`strata-vision-hip`) for the same architectures, and
+the rocBLAS and hipBLASLt kernel data for them only. A package whose GPU code does not cover the card is refused with one line that
+names the card family ("This build of Strata is for AMD RX 9000 cards. This computer has an AMD RX 7000 card ...").
+
+What was run on real hardware:
+
+- **Checked on every package** (no RX 7000 or Strix Halo card involved): it builds and links; every library the binaries import is in the
+  package or belongs to the OS (`packaging/binary_deps.py`); `package_engine.py --verify` passes; the GPU code inside each binary and
+  library lists exactly the architectures above (`llvm-objdump --offloading`); `strata --version` runs in a clean environment (on Windows with the package's `rocm\bin` folder on PATH, which Control sets); on a
+  gfx1201 card the Linux `halo` and `rx7900` builds refuse to start with the plain message (the Windows `rdna3` build was not run on an RX 9000 card: there is no Windows AMD machine); the feed picks the right package for each
+  architecture (`tests/terminal/test_release_matrix.py`).
+- **Not run by the maintainers:** any model on an RX 7000 card (gfx1100-1102) or a Strix Halo (gfx1151), on either OS. The maintainers have
+  no such card.
+- **Run by other people:** an RX 7900 XTX on Windows 11 ran the earlier ready-made Windows engine (0.1.40; [report #1173](../bench/results/2026-10-06-community-rx-7900-xtx/README.md));
+  RX 7900 XTX, XT and GRE owners ran Linux builds ([COMMUNITY.md](../bench/results/COMMUNITY.md)); Strix Halo owners ran Linux builds made from source
+  (ROCm 7.14 line). Nobody has reported a Strix Halo on Windows, or the packaged `halo` and `rdna3` engines.
+- **Tuning tables:** the packaged AMD engines do not carry the hipBLASLt tuning tables of `tools/hip` yet (they are planned for 0.2.1), so
+  the prompt's dense matrix products use plain hipBLAS. Prompt reading is slower than the numbers measured with a table, for example the
+  gfx1151 numbers in [STRIX_HALO.md](STRIX_HALO.md); answers are the same. A source build with the table is unchanged (see [Tuning table](#tuning-table)).
+
+Please report a run on an RX 7000 card or a Strix Halo (card, driver, OS, the end of `strata-<model>.log`).
+
 ## Windows
 
 Since 0.1.34 an AMD card on Windows is set up like an NVIDIA one: download Strata, double-click `START-HERE.bat`.
@@ -74,7 +114,8 @@ On a PC with no NVIDIA card Strata can use, the AMD card is chosen by itself; wi
   install, no compiler, no admin rights.
 - **Detection:** setup reads the display adapters Windows lists (their PCI ids; the VRAM size from the display
   driver's registry entry). An integrated Radeon is listed as not supported, except the Ryzen AI Max "Strix Halo" (Radeon 8060S / 8050S / 8040S, gfx1151: [STRIX_HALO.md](STRIX_HALO.md)); a Strix Point (890M / 880M, gfx1150), Krackan (860M / 840M, gfx1152) or Phoenix / Hawk Point (780M / 760M, gfx1103) Radeon is named as what it is and not supported (on Linux the 780M / 760M has an opt-in build: [RADEON_780M.md](RADEON_780M.md)).
-- **Engine:** the ready-made `strata-windows-x64-hip.zip` from the release (built by `tools\hip\build_windows.bat`
+- **Engine (0.2.0 and later):** the installers and `strata update` use the engine packages in [Ready-made packages](#ready-made-packages-020); the zip described next is the START-HERE route of 0.1.x.
+- **Engine (START-HERE, 0.1.x):** the ready-made `strata-windows-x64-hip.zip` from the release (built by `tools\hip\build_windows.bat`
   for gfx1100, gfx1101, gfx1102, gfx1200, gfx1201, gfx1030 and, from 0.1.40, gfx1151 (Strix Halo, unvalidated on Windows)) goes into `engine\`. It carries the ROCm libraries the
   engine loads (`engine\rocm\bin`: the HIP runtime, hipBLAS / rocBLAS / hipBLASLt with their kernels for these cards,
   amd_comgr and the Microsoft C++ runtime; ROCm 10.2.0a20260930 from AMD's TheRock builds, licenses in
