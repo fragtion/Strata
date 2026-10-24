@@ -124,6 +124,7 @@ int main(int argc, char** argv) {
     long mb = 3072;
     bool exact = false, expert = false;
     int dtype = -1;
+    std::string dump;   // --dump FILE: ggml-cpu's results (nt x rows floats) written raw - compare two builds with cmp
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto val = [&] { return i + 1 < argc ? std::atol(argv[++i]) : 0L; };
@@ -135,6 +136,7 @@ int main(int argc, char** argv) {
         else if (a == "--exact") exact = true;
         else if (a == "--expert") expert = true;
         else if (a == "--dtype") dtype = (int) val();
+        else if (a == "--dump" && i + 1 < argc) dump = argv[++i];
     }
     if (expert) return run_expert(type, dtype < 0 ? type : dtype, threads, mb, nt, reps);
     ggml_cpu_init();
@@ -204,6 +206,12 @@ int main(int argc, char** argv) {
 
     const double t_gg = pass(0, p0.data());
     const double t_own = pass(1, p1.data());
+    if (!dump.empty()) {
+        if (std::FILE* df = std::fopen(dump.c_str(), "wb")) {
+            for (int t = 0; t < nt; ++t) std::fwrite(o0[(size_t) t].data(), 4, (size_t) rows, df);
+            std::fclose(df);
+        }
+    }
     long bad = 0, differ = 0;
     double worst = 0, worst_ref = 0, absmax = 0, absdiff = 0;
     for (int t = 0; t < nt; ++t)

@@ -1277,10 +1277,35 @@ class Strata:
         if installed or free is None or words.startswith("does not fit"):
             return words
         pl = self.dsv41_plan(hw, free, model=model)
-        if pl.get("disk_ok") is False:
-            return (f"tight: it needs about {pl['disk_need_gb']:.0f} GB of free disk space (the download and its preparation) and this computer has "
+        from strata_control import dsv41_fit
+        left = self.dsv41_left_gb(model, pl["download_gb"])                   # only what still has to be downloaded (files already here count as done)
+        need = left + dsv41_fit.DISK_HEADROOM_GB                             # + the pack (MBs) and room to work
+        if left > 0.05 and free < need:
+            return (f"tight: it needs about {need:.0f} GB of free disk space (the rest of the download and its preparation) and this computer has "
                     f"{free:.0f} GB free; free some space or choose another drive when you install it ({words})")
         return words
+
+    def dsv41_left_gb(self, model, default: float) -> float:
+        """GB of this DeepSeek set's files still to be downloaded: the files already in Strata's models folder (the right size; the first release's
+        names count too) are done, so the disk check asks only for the rest.  Files the person keeps elsewhere (--model-path) are handled by the plan.
+        `default`: what to answer when the tables cannot be read (the whole download)."""
+        S = self.setup_module()
+        try:
+            fam = S.MULTI_FILE_FAMILIES["deepseek41"]
+            md = fam["models"][model]
+            models = self.data_dir() / "models"
+            folder, shared = models / (fam["tag"] + model), models / (fam["tag"] + "shared")
+            left = 0
+            for where, names in ((folder, md["shards"]), (shared, md.get("shared", []))):
+                for n in names:
+                    for cand in (n, getattr(S, "DSV41_LEGACY_NAMES", {}).get(n)):
+                        if cand and (where / cand).is_file() and (where / cand).stat().st_size == S.DSV41_ALL_FILES[cand][0]:
+                            break
+                    else:
+                        left += S.DSV41_ALL_FILES[n][0]
+            return left / 1e9
+        except Exception:                                    # noqa: BLE001 - a hint for the menu: when unsure, count the whole download
+            return default
 
     def _dsv41_memory_words(self, hw, model=None) -> str:
         pl = self.dsv41_plan(hw, model=model)

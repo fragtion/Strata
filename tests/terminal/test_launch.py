@@ -970,6 +970,11 @@ class FlagsCommand(unittest.TestCase):
         self.assertEqual(code, 0)                                              # the preset's own key
         self.assertTrue(out.strip().startswith("sk-strata-"))
 
+    def test_a_setup_line_joined_after_the_model_could_not_be_installed_starts_with_a_capital(self):
+        from strata_cli.launch.runner import setup_failure
+        e = setup_failure([], "the model does not answer sensibly after the preparation: no answer", "", None, False)
+        self.assertTrue(e.text.startswith("The model could not be installed. The model does not answer sensibly"), e.text)
+
     def test_a_reason_joined_after_a_sentence_starts_with_a_capital(self):
         from strata_cli.launch.runner import capital
         self.assertEqual(capital("the update feed could not be read: no route"), "The update feed could not be read: no route")

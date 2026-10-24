@@ -497,6 +497,8 @@ class ModelScreen(Base):
         if problem:
             self.say(f"{problem[0]} {problem[1]}", True)
             return
+        if self.check_own_deepseek(path):
+            return
         try:
             plan = models.plan_import(models.absolute(path))
         except Exception as e:                               # noqa: BLE001
@@ -517,6 +519,37 @@ class ModelScreen(Base):
             holds = next((m for m in plan.get("messages") or [] if "holds" in m), "")
             self.say(f"These files cannot be used as they are ({why}). " + (holds + " " if holds else "") +
                      "Check that every shard is in the folder, or pick a model from the list.", True)
+
+    def check_own_deepseek(self, path: str) -> bool:
+        """The files are DeepSeek-V4.1-Flash's (the pinned shard names): taken as that model, as `strata launch --model-path` does, instead of
+        the generic file check, which does not know DeepSeek and said "could not be read" for its n-gram shard (#3914).  True when it answered."""
+        from strata_cli.launch.runner import Runner
+        try:
+            mod = self.ctx.catalog.strata.setup_module()
+            found = Runner.deepseek_set_in(mod, path, self.ctx.settings.model)
+        except Exception:                                    # noqa: BLE001 - not DeepSeek's: the usual check goes on
+            return False
+        if found is None:
+            return False
+        model, d, folder = found
+        legacy = getattr(mod, "DSV41_LEGACY_NAMES", {})
+        missing = [n for n in d["shards"] if not (folder / n).exists() and not (legacy.get(n) and (folder / legacy[n]).exists())]
+        if missing:
+            self.say(f"These are DeepSeek-V4.1-Flash {d.get('label', model)} files, but {len(missing)} of {len(d['shards'])} parts are not in {folder} "
+                     f"(first missing: {missing[0]}). Put every part in the folder, or pick a model from the list.", True)
+            return True
+        s = self.ctx.settings
+        s.model_path, s.family, s.model = str(folder), "deepseek41", model
+        self.ctx.picked_in_list = False
+        self.close_field("own")
+        gb = sum(x.stat().st_size for x in folder.iterdir() if x.is_file() and x.name.endswith(".gguf")) / 1e9
+        self.say(f"These files are DeepSeek-V4.1-Flash {d.get('label', model)} ({gb:.0f} GB in this folder). Press Enter to use them.")
+        try:
+            self.menu().select(("deepseek41", model))
+        except Exception:                                    # noqa: BLE001 - the list may not show it; the choice is already made
+            pass
+        self.paint()
+        return True
 
     def action_back(self) -> None:
         if self.input_open():

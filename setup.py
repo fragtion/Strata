@@ -7751,6 +7751,24 @@ def dsv41_engine_dir(eng: Path) -> Path:
     return (home() if CONTROL else Path(eng).parent) / DSV41_ENGINE_DIR
 
 
+def github_reachable(timeout: float = 10.0) -> bool:
+    """Does GitHub answer within `timeout` seconds (any HTTP answer counts; no answer, a refused or timed-out connection does not)?  One quick check
+    instead of minutes of retries when the connection is down (a SYN that is never answered)."""
+    try:
+        _urlopen(urllib.request.Request("https://github.com", method="HEAD", headers={"User-Agent": "strata-setup"}), timeout=timeout).close()
+        return True
+    except urllib.error.HTTPError:
+        return True
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+def dsv41_engine_pending(eng: Path) -> bool:
+    """A DeepSeek engine package file the person put in engine-dsv41/ is there to be installed (no download needed)."""
+    from strata_control import dsv41_engine
+    return bool(dsv41_engine.pending(dsv41_engine_dir(eng)))
+
+
 def dsv41_manual_steps(eng: Path) -> str:
     return (f"If you downloaded the DeepSeek engine package from the release page (the file strata-dsv41-...-{'windows' if WIN else 'linux'}-....{'zip' if WIN else 'tar.gz'}), "
             f"run the same command again with --dsv41-package PATH-OF-THE-FILE (strata launch accepts it too), or put the file in {dsv41_engine_dir(eng)} "
@@ -7784,6 +7802,22 @@ def get_dsv41_engine(eng: Path, hip: bool, package: str | None = None) -> Path |
     if exe is None:
         warn("no DeepSeek engine package could be fetched (see above)")
     return exe
+
+
+def upgrade_dsv41_engine(eng: Path, exe: Path) -> Path:
+    """The installed DeepSeek engine package is older than the signed feed's: updated next to it, switched after its test start, the old one removed
+    (strata_control.dsv41_engine.upgrade).  Silent when the feed cannot be reached; a failure is one plain line and `exe` keeps running."""
+    from strata_control import dsv41_engine
+    try:
+        from strata_cli import update_cmd
+        root = dsv41_engine_dir(eng)
+        source = update_cmd._feed_source(argparse.Namespace(feed=None), root.parent)
+        if not dsv41_engine.source_reachable(source):
+            return exe
+        new = dsv41_engine.upgrade(root, source, installed=exe, emit=lambda m: say("  " + m))
+    except Exception:                                      # noqa: BLE001 - never stop a setup for this
+        return exe
+    return new or exe
 
 
 def dsv41_exe(eng: Path) -> Path | None:
@@ -8008,12 +8042,20 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
     pip_install(runtime_packages(),
                 "numpy, jinja2, regex, pyyaml, tqdm, requests, cmake, ninja, pillow, psutil, textual (the screens)")
 
-    step(4, "the Strata engine")
-    llama, eng, meta, lib_dirs, gpu, _vision = engine_step(a, gpu, hip, amd, cuda_tk, "none")
+    # DeepSeek runs on its own engine package: the Strata (Qwen) engine, its llama.cpp source and its CUDA libraries are not needed for it, so none of
+    # them is downloaded or test-started here (they were ~700 MB, and a stop on every one of them when GitHub could not be reached).
+    step(4, "the DeepSeek engine")
+    eng, meta, lib_dirs = ROOT / "engine", {"version": None}, []
     exe = dsv41_exe(eng)
+    if exe is None and not getattr(a, "dsv41_package", None) and not dsv41_engine_pending(eng) and not github_reachable():
+        fail("Strata can't reach GitHub to download the DeepSeek engine.",
+             "Check the internet connection and run the same command again. " + dsv41_manual_steps(eng))
     if exe is None and not getattr(a, "build", False):
         get_dsv41_engine(eng, hip, getattr(a, "dsv41_package", None))
         exe = dsv41_exe(eng)
+    if (exe is not None and not getattr(a, "dsv41_package", None) and not getattr(a, "build", False)
+            and not (os.environ.get("STRATA_DSV41_EXE") or "").strip() and exe.parent.parent == dsv41_engine_dir(eng)):
+        exe = upgrade_dsv41_engine(eng, exe)               # an installed package older than the signed feed's: updated next to it, switched after it starts
     if exe is not None and exe.parent != Path(eng):
         lib_dirs = [*lib_dirs, str(exe.parent)]            # its own package carries the libraries it needs
     if exe is None:
