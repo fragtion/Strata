@@ -1041,9 +1041,15 @@ class TuningScreen(Base):
     def on_mount(self) -> None:
         s = self.ctx.settings
         first = self.ctx.fresh_setup and not s.is_tuned
-        items = [Item(["Quick", "about 20 minutes", "checks the most likely gains" + ("; suggested the first time" if first else "")], key="quick"),
-                 Item(["Thorough", "up to 2 hours", "tries more settings, measures each one several times"], key="thorough"),
-                 Item(["Skip", "", "use the default settings (already good on most computers)"], key="skip")]
+        if s.family == "deepseek41":                         # DeepSeek's own short tune (tools/dsv41/tune.py): its real length and what it tries
+            items = [Item(["Quick", "about 5-10 minutes", "tries the DSpark drafter on or off, a shorter draft block and the CPU threads; keeps only clear gains"
+                           + ("; suggested the first time" if first else "")], key="quick"),
+                     Item(["Thorough", "about 10-15 minutes", "also tries every CPU thread"], key="thorough"),
+                     Item(["Skip", "", "use the default settings (already good on most computers)"], key="skip")]
+        else:
+            items = [Item(["Quick", "about 20 minutes", "checks the most likely gains" + ("; suggested the first time" if first else "")], key="quick"),
+                     Item(["Thorough", "up to 2 hours", "tries more settings, measures each one several times"], key="thorough"),
+                     Item(["Skip", "", "use the default settings (already good on most computers)"], key="skip")]
         if not self.ctx.tune_chosen and s.tune == "skip" and not s.is_tuned and self.ctx.fresh_setup:
             s.tune = "quick"
         self.query_one(Menu).set_items(items, {"quick": 0, "thorough": 1, "skip": 2}.get(s.tune, 0))
@@ -1449,7 +1455,8 @@ class SaveScreen(Base):
                  ("Context", S.context_label(s.context) + f", memory {s.kv or 'int8'}"),
                  ("Pictures", "on" if s.vision != "off" else "off"),
                  ("Parallel", f"{s.parallel} at a time" if s.parallel else f"fit to your card ({S.fit_parallel(self.ctx.computer.main_vram_gb)})"),
-                 ("Tuning", {"quick": "quick (about 20 min)", "thorough": "thorough (up to 2 h)", "skip": "skipped"}[s.tune]),
+                 ("Tuning", ({"quick": "quick (about 5-10 min)", "thorough": "thorough (about 10-15 min)", "skip": "skipped"} if s.family == "deepseek41"
+                              else {"quick": "quick (about 20 min)", "thorough": "thorough (up to 2 h)", "skip": "skipped"})[s.tune]),
                  ("Access", f"{S.ACCESS_WORDS[s.access]}, port {s.port}" + (", API key on" if s.api_key else ", no API key")),
                  ("Storage", s.data_dir or str(self.ctx.default_folder()))]
         if s.extra:
