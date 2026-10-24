@@ -291,6 +291,9 @@ def config_problems(cfg: dict, pc: PoolConfig) -> list[str]:
     """What in the run config a pool cannot do (the engine refuses these too; the Pool tab says so first)."""
     if pc.role in ("off", "router"):           # routing: every PC runs the whole model as it would alone
         return []
+    if (cfg.get("arch") or "") == "deepseek41":   # its own engine (strata-dsv41), not the one with the layer split
+        return ["DeepSeek-V4.1 runs on its own engine, which has no layer split: use Share requests (each PC runs the "
+                "whole model) or run it alone"]
     args = cfg.get("args") or []
     out = []
     exe = cfg.get("exe")

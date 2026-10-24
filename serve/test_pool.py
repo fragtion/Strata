@@ -158,6 +158,13 @@ class Config(unittest.TestCase):
         self.assertEqual(len(config_problems({"args": [], "vision": {"exe": "v"}}, pc)), 1)
         self.assertEqual(len(config_problems({"args": ["--control-vector-scaled", "x:1"], "gpu": "0,1"}, pc)), 2)
         self.assertEqual(config_problems({"args": [], "vision": {}}, PoolConfig(None, {"role": "off"})), [])
+        # DeepSeek-V4.1 has its own engine (no layer split): the split roles refuse it with one line, routing takes it
+        ds = {"args": [], "arch": "deepseek41", "exe": "engine-dsv41/strata-dsv41.exe"}
+        for role in ("worker", "coordinator"):
+            got = config_problems(ds, PoolConfig(None, {"role": role}))
+            self.assertEqual(len(got), 1)
+            self.assertIn("DeepSeek-V4.1", got[0])
+        self.assertEqual(config_problems(ds, PoolConfig(None, {"role": "router"})), [])
         # an engine without the layer split's code: the split roles say so, routing does not need it
         with tempfile.TemporaryDirectory() as d:
             old, new = Path(d) / "old.exe", Path(d) / "new.exe"
