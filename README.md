@@ -14,107 +14,44 @@ StrataPool adds a **Pool** tab that lets Strata use more than one PC:
 - **Share requests:** every PC runs the whole model. A chat runs on the PC that holds its conversation, else on an
   idle one, so two chats (or an agent's subtasks) run on two PCs at once.
 
-## A laptop joined to a desktop: 23-33% faster than the desktop alone
+## What to expect
 
-We joined a gaming laptop to a desktop that already ran Strata and measured both against each PC alone, with the
-same model, the same requests and the same settings. Upstream Strata 0.1.40.1, built the same way, is the reference.
+A pool helps most when one PC cannot cache the model well: a mixture-of-experts model whose experts do not fit in
+one card's VRAM. Our pair is a desktop (RTX 3060 12 GB, Core i5-12600KF, 64 GB of RAM) and a gaming laptop (RTX 5060
+Laptop GPU 8 GB, Core i7-14650HX, 32 GB), both on Windows 11 on a wired 1 Gbps LAN, running Qwen3.8-Flash-Next
+**Coder IQ1_M**. Against the desktop alone:
 
-- **One chat writes 23% faster** on average with Split layers at its default settings (50.8 against 41.2 tokens/s),
-  and up to 33% on prose. That is 61-109% faster than the laptop alone.
-- **Overlap the PCs** adds a little more (52.0 tokens/s, +26%), now that it serves the verified window first.
-- **Two chats at once** get through 30% more tokens per second on the split, one after the other (52.5 tokens/s for
-  both), and 24% more with Share requests (one chat on each PC).
-- **Switching between agent conversations is instant on the split too:** each switch read 24-33 new tokens and took
-  the other 3,300-3,500 from parked conversations, as one PC does.
+| | What to expect |
+| --- | --- |
+| **One chat, writing** (Split layers, the defaults) | about **20-30% faster**, the most on prose |
+| **+ Overlap the PCs** | a few percent more on code, about the same on prose |
+| **Two chats** | about **25-30% more** tokens per second in total: Share requests runs one on each PC; the split runs them one after the other, each at the split's speed |
+| **Switching agent conversations** | as quick as on one PC: each PC restores its part of a parked conversation instead of reading it again |
+| **Reading a long prompt** | about **a third slower**: every chunk also passes through the slower PC's layers |
+| **Several chats at once** (batch slots in a split) | slower on a two-PC home pool; it is for pools that serve many agents at once |
 
-<p align="center"><img src="docs/media/pool-results.svg" width="760" alt="Writing speed, one chat: laptop alone 28.3 tok/s, desktop alone 41.2 (upstream Strata), split pool 50.8 (+23%), with Overlap 52.0 (+26%), with Several chats at once 43.6 (+6%). Two chats at once: laptop 27.4, desktop 40.3, Share requests 49.8 (+24%), split pool 52.5 (+30%), split with Several chats 38.4 (-5%), with drafts in several chats 43.0 (+7%)."></p>
+The ranges come from our runs on that pair with [tools/pool_bench.py](tools/pool_bench.py) (greedy decoding, the
+same text for every setup) in October 2026, on StrataPool versions from Strata 0.1.40 to 0.1.45. In long agent
+sessions on StrataPool with Strata 0.1.45 (100-170K tokens of context, temperature 0.6), the split wrote about 45-75
+tokens/s and read new prompt text at about 1,100 tokens/s. Your PCs will differ: `tools/pool_bench.py` sends the same
+requests to any server, so run it against each PC alone, the split and Share requests to measure your own pool.
 
-**Where the speed comes from:** memory, not compute. The desktop's 12 GB card holds about 2,300 of the model's
-experts and its CPU computes the rest. Split, each PC caches the experts of its own layers (the laptop 1,762 of
-layers 29-47), so more of every word runs on a GPU. A pool never adds the GPUs together on one word: each word
-passes through the layers in turn, so the PCs take turns. That is why the gain is largest when a model is too big
-for one PC to cache well, and why Share requests adds chats, not speed per chat.
+**Where the speed comes from:** memory, not compute. A 12 GB card holds a few thousand of the model's experts and
+the CPU computes the rest. Split, each PC caches the experts of its own layers, so more of every word runs on a GPU.
+A pool never adds the GPUs together on one word: each word passes through the layers in turn, so the PCs take turns.
+That is why the gain is largest when a model is too big for one PC to cache well, and why Share requests adds chats,
+not speed per chat.
 
-**What it costs:** reading a prompt. The split read a 9,800-token document at 696 tokens/s against the desktop's
-1,030 alone: each chunk also passes through the laptop's layers, and the laptop reads prompts about 2.4 times slower
-than the desktop (its 8 GB card holds few experts of its own). Agent turns that add a few hundred tokens to a
-parked conversation are barely touched.
+**Getting the most from it:**
 
-### The PCs
-
-| | Coordinator (desktop) | Worker (laptop) |
-| --- | --- | --- |
-| GPU | RTX 3060, 12 GB (PCIe 4.0 x16) | RTX 5060 Laptop GPU, 8 GB |
-| CPU | Core i5-12600KF (6P + 4E) | Core i7-14650HX (8P + 8E) |
-| RAM | 64 GB | 32 GB |
-| Context | 256K, K/V int8 streamed from RAM | 192K, K/V int8 streamed from RAM |
-| Calibrated (`--calibrate`) | PCIe share 0.35, draft floor 0.70, 5 CPU workers | PCIe share 0.20, draft floor 0.30, 7 CPU workers |
-| Layers in the split (automatic) | 0-28, with the embedding, the head and the draft layer | 29-47 |
-
-Both on Windows 11, on a home LAN with a 0.6-0.8 ms round trip (100-350 KiB cross it per decode window).
-Model: Qwen3.8-Flash-Next **coder IQ1_M**. Measured on 2026-10-06 with **[tools/pool_bench.py](tools/pool_bench.py)**:
-greedy decoding with the shipped penalties (presence 1.0 over 512 tokens) and thinking off, so every setup writes
-the same text; each run starts its prompts with its own id, so no cache from an earlier run helps. Upstream Strata
-0.1.40.1 was compiled with the same compiler, CUDA 13.0 and flags as StrataPool, with the same config and expert
-profile. The raw results are in [bench/results/2026-10-06-stratapool](bench/results/2026-10-06-stratapool). A run
-moves by about ±3% between repeats (the desktop's two runs each), so read ranges, not decimals.
-
-### Writing speed (tokens/s)
-
-| Setup | Code (1,200 tokens) | Prose (1,000) | Answer to a 9.8K-token document | Agent's first turn |
-| --- | ---: | ---: | ---: | ---: |
-| Laptop alone, upstream Strata | 31.9 | 25.0 | 28.1 | 25.2 |
-| Desktop alone, upstream Strata | 46.3 | 39.3 | 37.9 | 38.9 |
-| Desktop alone, StrataPool | 43.5-44.5 | 37.5-38.2 | 35.6-37.2 | 35.3-36.6 |
-| **Split pool, defaults** | **51.3** | **52.2** | **48.8** | **49.6** |
-| + Overlap the PCs | 55.4 | 50.5 | 50.1 | |
-| + Several chats at once (one chat running) | 48.4 | 39.7 | 42.8 | 42.5 |
-
-Single runs (two for the desktop alone); StrataPool and upstream alone are the same speed once runs are alternated
-(see What we learned).
-
-### Two chats at the same time
-
-| Setup | Both answers (2,200 tokens) | Each chat |
-| --- | ---: | --- |
-| Laptop alone / desktop alone (one after the other) | 27.4 / 40.3 tokens/s | one waits for the other |
-| Share requests | 49.8 tokens/s | one on each PC: 37.8 on the desktop, 30.7 on the laptop |
-| **Split pool (one after the other)** | **52.5 tokens/s** | one waits, but each runs at the split's speed |
-| Split pool, Several chats at once | 38.4 tokens/s | together, but a chat in a slot writes without drafts (19.9) |
-| + Drafts in several chats | 43.0 tokens/s | the slot chat still wrote at 21 |
-
-### Reading prompts (tokens/s)
-
-| Setup | 9.8K-token document | 3.3K-token agent start | ~560 tokens | ~2,100 | ~3,000 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Laptop alone, upstream Strata | 265 | 242 | 186 | 244 | 271 |
-| Desktop alone, upstream Strata | 1,030 | 819 | 349 | 812 | 911 |
-| Desktop alone, StrataPool without CPU help | 1,013-1,021 | 817-821 | 348-353 | 814-815 | 910-917 |
-| Desktop alone, StrataPool with CPU help | 1,021-1,029 | 799-812 | **387-394** | 766-776 | 838-845 |
-| Split pool | 696 | 552 | 358 | 525 | 565 |
-
-The CPU help (from architectds' fork) read ~560-token prompts 11% faster. Staging chunks up to 3,072 tokens for it,
-as architectds does on PCIe 3.0, made 2-3K-token prompts 5-8% slower on the desktop's PCIe 4.0 x16. Since the sync with
-Strata 0.1.43 StrataPool uses Strata's own CPU prefill share instead (on by default below 1,024 tokens, on every pool
-PC; Strata measured 512-1,000-token prompts 20-34% faster on an RTX 3060), so these rows are the earlier code's.
-
-### What we learned
-
-- **Defaults first.** Split layers with Several chats Off is the fastest setup on this pair, for one chat and for two
-  chats one after the other. Overlap the PCs is now a small gain (code +8%, prose -3%, the document answer +3%); keep
-  it if your own replies are mostly code.
-- **Several chats at once is still a loss here,** with or without drafts: the extra slot costs the laptop VRAM, and a
-  chat in a slot writes at about half speed. It is for pools that serve many agents at once, not for one user.
-- **Each PC alone, StrataPool is as fast as upstream.** The single runs above differ by a few percent either way,
-  which is the noise: a greedy reply's words still drift between runs (experts computed on the GPU or the CPU round
-  differently, and the CPU threads add in varying order), and with them how many drafts each window accepts.
-  Alternating the two engines twice each with expert swaps and the PCIe share off ([`ab-*`
-  runs](bench/results/2026-10-06-stratapool)): desktop code / prose / document 36.8 / 30.6 / 28.0 tok/s on StrataPool
-  against 35.0 / 30.1 / 27.7 upstream, the same time per window (82 / 66 / 87 ms against 83 / 64 / 85); laptop 25.8 /
-  22.1 / 23.8 against 25.8 / 20.5 / 23.9, with repeats of the same engine 10% apart. Prompt reading is the same,
-  faster on short prompts with the CPU help.
-- In real agent sessions at 40-80K tokens of context (a coding agent at temperature 0.6, an earlier StrataPool), the
-  split wrote 34-40 tokens/s where the desktop alone wrote 21-33.
+- **Wired network.** Wi-Fi works, but every word crosses it. The `f16` wire format (Pool tab) sends half the bytes
+  of `f32`.
+- **Keep VRAM free on each PC at long contexts** (`--vram-reserve-mib` in the model's config; about 1,400-1,600 MiB
+  on a 12 GB card). A card that fills up during a long prompt makes Windows move GPU memory to RAM: our desktop, with
+  770 MiB free, read a 168K-token prompt at about 500 tokens/s instead of about 1,100, and once it reached 0 MiB a
+  window stalled.
+- **Defaults first.** Split layers with Several chats off is the fastest setup on a two-PC pool; turn on Overlap
+  the PCs if your replies are mostly code.
 
 ## What StrataPool adds
 
@@ -132,8 +69,8 @@ PC; Strata measured 512-1,000-token prompts 20-34% faster on an RTX 3060), so th
 - **Overlap the PCs** (one chat): the coordinator starts the next window while the workers finish the current one.
 - **Several chats at once / Drafts in several chats:** batch slots pipelined across the PCs, each chat with its own
   repetition penalties.
-- **For each PC alone too:** faster prompt tokenizing on long conversations, CPU help on short prompts, and the fixes
-  listed under Credits.
+- **For each PC alone too:** faster prompt tokenizing on long conversations, IQ1_S models on the GPU and the CPU, and
+  the fixes listed under Credits.
 
 ## What you need
 
@@ -141,6 +78,8 @@ PC; Strata measured 512-1,000-token prompts 20-34% faster on an RTX 3060), so th
   ([what Strata needs](https://github.com/Niko1221/Strata#what-you-need)). For Split layers, each needs an NVIDIA
   card (RTX 20 or newer, 8 GB or more) and **the same model and size** installed.
 - A wired network is best. Wi-Fi works, but slower.
+- DeepSeek-V4.1-Flash runs on its own engine, which has no layer split: in a pool it can use Share requests (each PC
+  runs the whole model), not Split layers.
 
 ## Install
 
@@ -174,13 +113,12 @@ compressed versions and every credit. StrataPool is open source under the [MIT L
 parts and every model have their own licenses ([which ones](docs/HOW_IT_WORKS.md#license)).
 
 **Code StrataPool carries that is not (yet) in Strata's own releases.** Thanks to everyone below; each item is credited
-in its commit on `pool-support`. Where we measured an effect on the PCs above, it is given; the others are fixes or
-were not measured on their own.
+in its commit on `pool-support`. Where we measured an effect, it is given; the others are fixes or were not
+measured on their own.
 
 | Who | What | What it does for StrataPool |
 | --- | --- | --- |
 | [architectds](https://github.com/architectds/Strata) | pipelined decode: the verified window served first, the prompt lookup carried across windows, the gate at 0.10 | **Overlap the PCs**, measured 6% slower than the defaults before, now code +8%, prose -3%, the document answer +3% |
-| [architectds](https://github.com/architectds/Strata) | CPU-assisted prompt reading (until the 0.1.43 sync) | ~560-token prompts read **11% faster** on the desktop; Strata's own CPU prefill share (0.1.41) now does this on every pool PC |
 | BlueKingMuch - [#1163](https://github.com/Niko1221/Strata/pull/1163), [#1164](https://github.com/Niko1221/Strata/pull/1164) (in Strata since 0.1.45) | a parked conversation's reserve kept small | the split's version of #1164's sibling borrow: each PC borrows its own part, so sibling subagents stop re-reading each other's history |
 | Vadim / tirex999 ([DACAN](https://github.com/tirex999/DACAN)) | parked conversations with KV streaming (the idea) | led to parked conversations across the split (above) |
 | AncientMystic - [#855](https://github.com/Niko1221/Strata/pull/855) | the PLE page cache without its 45x read amplification | the lookup table's page cache no longer reads the same pages many times over |
@@ -188,7 +126,7 @@ were not measured on their own.
 | ATIVX928 - [#1019](https://github.com/Niko1221/Strata/pull/1019) | the int8 K/V gather decodes 8 values per thread | |
 | Maxim Shipko - [#1064](https://github.com/Niko1221/Strata/pull/1064) | commit limits applied after an allocation failure | |
 | sergiywith - [#1231](https://github.com/Niko1221/Strata/pull/1231), [#1284](https://github.com/Niko1221/Strata/pull/1284) | the elastic K/V without a lend; `--adapt-decay` checked | |
-| Yxmura - [#1374](https://github.com/Niko1221/Strata/pull/1374) | IQ1_S on the GPU and on AVX2; IQ1_S and IQ1_M on AVX-512 | Unsloth's UD-IQ1_S models run, on every PC of a pool |
+| Yxmura - [#1374](https://github.com/Niko1221/Strata/pull/1374) | IQ1_S on the GPU and on AVX2; IQ1_S and IQ1_M on AVX-512 | Unsloth's UD-IQ1_S models run, on every PC of a pool. Since Strata 0.1.49 the AVX2 IQ1_M rows are Strata's own (about 20-30% faster per expert in our kernel test), and StrataPool sends Qwen's IQ1_M experts to them |
 | anon761 - [#1247](https://github.com/Niko1221/Strata/pull/1247) | a layer split inside one PC: `--prefill-help` | for a pool PC with two cards |
 | Jeremiah Ritchey - [#1290](https://github.com/Niko1221/Strata/pull/1290) | batch-MTP drafters share their weights fully; a slot's draft row only where the context and its answer leave room | **Drafts in several chats** holds less VRAM |
 | lask3802 - [#1748](https://github.com/Niko1221/Strata/pull/1748) (the idea) | a layer split across PCs over TCP ("remote stage"), with every measurement written down | the Windows clock finding behind `POOL-CLOCKS.bat`; workers take the coordinator's `STRATA_ROUTE_TAIL_SKIP` |
