@@ -128,11 +128,14 @@ Windows starts a program at the lower of its parent's integrity and its file's m
 sandbox (Claude's Cowork, some sync tools) can carry a **Low** label that every file created in it inherits, and an
 engine running at Low has "Lock pages in memory" taken out of its token: large pages fail with error 1314, and the
 working-set lock that lets Windows pin more of the experts fails too. `POOL-INTEGRITY.bat` (as administrator, on each
-PC) relabels `engine\*.exe`, the `.venv`'s Python and the Python that venv runs to Medium, the same for a Strata
-install next to the folder (`..\strata`) and any venv, folder or `.exe` named on its command line; removes the
-downloaded-file mark from an engine copied from another PC; and says whether the account holds "Lock pages in memory"
-(granted in `secpol.msc`, effective at the next logon). A rebuilt or copied `strata.exe` takes the folder's label again,
-so run it after each one. The folders themselves are left alone.
+PC) relabels `engine\*.exe`, the image generator (`engine-image\`), the DeepSeek engine (`engine-dsv41\<version>\`),
+the `.venv`'s Python and the Python that venv runs to Medium, the same for a Strata install next to the folder
+(`..\strata`) and any venv, folder or `.exe` named on its command line; removes the downloaded-file mark from an
+engine copied from another PC; and says whether the account holds "Lock pages in memory" (granted in `secpol.msc`,
+effective at the next logon). A rebuilt, copied or updated engine takes the folder's label again, so run it after
+each one (setup updating the DeepSeek engine package counts). The folders themselves are left alone. The DeepSeek
+engine uses neither large pages nor the working-set lock, so its label does not change its speed; a Low program
+also cannot write outside Low-labelled folders, which is why the image generator could not save its pictures.
 
 ## Testing it on one PC first
 

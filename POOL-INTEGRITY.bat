@@ -6,7 +6,8 @@ rem A program starts at the LOWER of its parent's integrity and its file's manda
 rem sandbox (Claude's Cowork, some sync tools) can carry a "Low" label that every new file in it inherits; an engine
 rem started at Low gets "Lock pages in memory" stripped from its token, so large pages fail with error 1314 and Windows
 rem pins less RAM.  This script:
-rem   - relabels this folder's engine\*.exe, its .venv's Python and the Python that venv runs (pyvenv.cfg "home") to Medium,
+rem   - relabels this folder's engine\*.exe (and engine-image\, and the DeepSeek engine in engine-dsv41\<version>\), its .venv's
+rem     Python and the Python that venv runs (pyvenv.cfg "home") to Medium,
 rem     plus the same for a Strata install next to this folder (..\strata) and any folder or .exe you name;
 rem   - removes the "downloaded from the internet" mark from the engine folder's files (copied from another PC);
 rem   - says whether this account holds "Lock pages in memory".
@@ -30,12 +31,10 @@ echo Folder label:
 call :showlabel "%ROOT%"
 echo.
 
-call :target "%ROOT%\engine"
-call :target "%ROOT%\.venv"
+call :install "%ROOT%"
 if exist "%ROOT%\..\strata\" (
   for %%d in ("%ROOT%\..\strata") do set "SIB=%%~fd"
-  call :target "!SIB!\engine"
-  call :target "!SIB!\.venv"
+  call :install "!SIB!"
 )
 :args
 if "%~1"=="" goto checks
@@ -61,6 +60,18 @@ echo.
 echo Relabelled %DONE% file^(s^), %FAILED% failed.  The engine's startup log should no longer say the large pages were
 echo refused ^(error 1314^).
 pause
+exit /b 0
+
+rem ---- one Strata / StrataPool folder: its engine, its venv, the image generator (engine-image) and the DeepSeek engine
+rem      packages (engine-dsv41\<version>\)
+:install
+call :target "%~1\engine"
+call :target "%~1\.venv"
+call :target "%~1\engine-image"
+if exist "%~1\engine-dsv41\" (
+  call :target "%~1\engine-dsv41"
+  for /d %%v in ("%~1\engine-dsv41\*") do call :target "%%~fv"
+)
 exit /b 0
 
 rem ---- a folder (engine or venv), or one .exe
