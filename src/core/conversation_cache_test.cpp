@@ -352,9 +352,11 @@ int main() {
             return std::pair<int64_t, int64_t>(a_found, b_found);
         };
         const auto baseline = replay(false, false);
-        check(baseline.first == 14 && baseline.second == 0, "baseline: A returns to its prompt-read state, B to nothing (as measured)");
+        // (as measured before #3404: B returned nothing, and with slot parks alone B's copy was evicted by a stale
+        // initial image; A's older, shorter copies are now superseded by its outgoing turns, which leaves B room)
+        check(baseline.first == 14 && baseline.second == 15, "baseline: A returns to its prompt-read state, B to its turn (#3404)");
         const auto parks_only = replay(true, false);
-        check(parks_only.first == 17 && parks_only.second == 0, "slot parks alone: A whole, B's copy evicted by a stale initial image");
+        check(parks_only.first == 17 && parks_only.second == 17, "slot parks alone: both return whole (#3404: no stale copy evicts B's)");
         const auto both = replay(true, true);
         check(both.first == 17 && both.second == 17, "slot parks + checkpoints back: both return whole");
     }
