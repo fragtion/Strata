@@ -55,7 +55,7 @@ class PoolConfig:
     DEFAULTS = {"role": "off", "name": "", "secret": "", "worker_port": ENGINE_PORT, "peers": [], "split": "auto",
                 "wire": "f32", "draft_wire": "f16", "discovery": True, "several_chats": False,
                 "overlap_windows": False, "chat_drafts": False,
-                "route_peers": [], "primary": False, "move_tokens": 8000}
+                "route_peers": [], "primary": False, "move_tokens": 8000, "env": {}}
 
     def __init__(self, path: str | None = None, data: dict | None = None):
         self.path = path
@@ -124,6 +124,18 @@ class PoolConfig:
             if out[k] not in WIRES:
                 raise ValueError(f"{k}: one of {', '.join(WIRES)}")
         out["discovery"] = bool(out["discovery"])
+        env = out["env"]                              # engine switches for a split (the coordinator hands the pool-wide
+        if not isinstance(env, dict) or len(env) > 32:   # ones on to its workers)
+            raise ValueError("env: an object of up to 32 STRATA_* settings")
+        clean_env = {}
+        for k, v in env.items():
+            if not isinstance(k, str) or not re.fullmatch(r"STRATA_[A-Z0-9_]{1,60}", k):
+                raise ValueError(f"env: {k!r} is not a STRATA_* setting")
+            v = str(v).strip() if isinstance(v, (str, int, float)) and not isinstance(v, bool) else None
+            if v is None or len(v) > 200 or any(c in v for c in "\r\n;"):
+                raise ValueError(f"env: {k} takes a number or a short text")
+            clean_env[k] = v
+        out["env"] = clean_env
         for k in ("several_chats", "overlap_windows", "chat_drafts"):
             sc = out[k]
             if isinstance(sc, str) and sc.lower() in ("true", "false", "on", "off", "1", "0"):
@@ -249,6 +261,7 @@ def worker_args(pc: PoolConfig) -> list[str]:
 def pool_env(pc: PoolConfig, env: dict) -> dict:
     """The secret travels in the environment, not on the command line (which other users of the PC can read)."""
     env = dict(env)
+    env.update(pc["env"])                           # the pool's own switches (the engine forwards the pool-wide ones)
     env["STRATA_POOL_SECRET"] = pc["secret"]
     env["STRATA_POOL_NAME"] = pc["name"] or hostname()
     return env

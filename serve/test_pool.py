@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from serve.frontend import ChatTemplate  # noqa: E402
 from serve.pool import (Discovery, PoolConfig, PoolManager, WorkerSupervisor, config_problems,  # noqa: E402
-                        coordinator_args, normalize_addr, parse_engine_pool, strip_pool_args, worker_args)
+                        coordinator_args, normalize_addr, parse_engine_pool, pool_env, strip_pool_args, worker_args)
 from serve.server import ByteTokenizer, Service, StrataEngine, serve  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -151,6 +151,18 @@ class Config(unittest.TestCase):
         # Strata's own CPU-pool flags stay
         self.assertEqual(strip_pool_args(["--pool-affinity", "auto", "--pool-workers", "15", "--pool-listen", "0.0.0.0:7701"]),
                          ["--pool-affinity", "auto", "--pool-workers", "15"])
+
+    def test_env_switches(self):
+        """The pool config's "env": STRATA_* switches for this PC's engine in a split (the coordinator forwards the
+        pool-wide ones); anything else is refused with the field named."""
+        pc = PoolConfig(None, {"role": "coordinator", "env": {"STRATA_PARK_ASYNC": "1", "STRATA_PREFILL_COPY_EVENT_EVERY": 4}})
+        self.assertEqual(pc["env"], {"STRATA_PARK_ASYNC": "1", "STRATA_PREFILL_COPY_EVENT_EVERY": "4"})
+        env = pool_env(pc, {"PATH": "x", "STRATA_PARK_ASYNC": "0"})
+        self.assertEqual((env["STRATA_PARK_ASYNC"], env["STRATA_PREFILL_COPY_EVENT_EVERY"], env["PATH"]), ("1", "4", "x"))
+        self.assertEqual(PoolConfig(None, {})["env"], {})
+        for bad in ({"PATH": "x"}, {"STRATA_X": "a;b"}, {"STRATA_X": True}, {"STRATA_X": "a\nb"}, ["STRATA_X"]):
+            with self.assertRaises(ValueError):
+                PoolConfig(None, {"env": bad})
 
     def test_problems(self):
         pc = PoolConfig(None, {"role": "worker"})

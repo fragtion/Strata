@@ -266,6 +266,15 @@ bool park_async_env() {   // STRATA_PARK_ASYNC (strata/core/conversation_snapsho
     static const bool on = [] { const char* v = std::getenv("STRATA_PARK_ASYNC"); return v != nullptr && v[0] == '1'; }();
     return on;
 }
+// POOL: the opt-ins the coordinator hands to its workers in CONFIG ("env"), so one setting on the coordinator switches
+// them for the whole pool; a worker that sets one itself keeps its own.  Only switches a worker reads after CONFIG
+// arrives (at its first prompt, park, checkpoint or verifier), and none sized by a PC's own VRAM or RAM.
+// STRATA_DEFAULTS=026 is not one: a worker reads it before CONFIG, so it is set on each PC.
+const char* const kPoolForwardEnv[] = {
+    "STRATA_PREFILL_COPY_EVENT_EVERY", "STRATA_PREFILL_COPY_WAIT_DEDUPE",   // #4005: the prompt walk's copy events
+    "STRATA_PARK_ASYNC", "STRATA_CKPT_ASYNC", "STRATA_CKPT_GATHER",           // #3779 / #3712: parks and checkpoints
+    "STRATA_ROUTE_PRIOR",                                                      // 0.2.7 residency-biased routing
+};
 bool ckpt_pool_env() {
     static const bool on = [] {
         const char* v = std::getenv("STRATA_CKPT_POOL");
@@ -4761,6 +4770,29 @@ int main(int argc, char** argv) {
         o.batch = (int) std::clamp<int64_t>(pool_cfg.i64("batch", 0), 0, strata::kernels::kVerifyMaxT);   // slot sessions
         pool_wide_rows = pool_cfg.i64("batch_mtp", 0) != 0;   // --batch-mtp: a slot's rows carry its draft too
         pool_tail_skip = (int) pool_cfg.i64("tail_skip", -1);
+        {   // the coordinator's pool-wide opt-ins (kPoolForwardEnv), where this PC has not set its own
+            const std::string fwd = pool_cfg.str("env", "");
+            std::string took;
+            for (size_t a = 0; a < fwd.size();) {
+                size_t b = fwd.find(';', a);
+                if (b == std::string::npos) b = fwd.size();
+                const std::string kv = fwd.substr(a, b - a);
+                a = b + 1;
+                const size_t eq = kv.find('=');
+                if (eq == std::string::npos || eq == 0) continue;
+                const std::string k = kv.substr(0, eq), v = kv.substr(eq + 1);
+                bool known = false;
+                for (const char* f : kPoolForwardEnv) known = known || k == f;
+                if (!known || std::getenv(k.c_str()) != nullptr) continue;   // (only the listed ones; this PC's own wins)
+#if defined(_WIN32)
+                _putenv_s(k.c_str(), v.c_str());
+#else
+                setenv(k.c_str(), v.c_str(), 1);
+#endif
+                took += (took.empty() ? "" : ", ") + kv;
+            }
+            if (!took.empty()) std::fprintf(stderr, "strata pool: from the coordinator: %s\n", took.c_str());
+        }
         o.prefill_chunk = pool_cfg.i64("prefill_chunk", o.prefill_chunk);
         o.prefill_auto = pool_cfg.i64("prefill_auto", o.prefill_auto ? 1 : 0) != 0;
         {
@@ -4989,6 +5021,13 @@ int main(int argc, char** argv) {
         {   // STRATA_ROUTE_TAIL_SKIP set on this PC: every worker's layers skip as this PC's do (-1: each PC's own default)
             const char* ts = std::getenv("STRATA_ROUTE_TAIL_SKIP");
             common.set("tail_skip", (int64_t) (ts != nullptr && ts[0] != '\0' ? std::max(0, std::atoi(ts)) : -1));
+        }
+        {   // the pool-wide opt-ins set on this PC (kPoolForwardEnv): "NAME=value;..." for every worker
+            std::string fwd;
+            for (const char* k : kPoolForwardEnv)
+                if (const char* v = std::getenv(k); v != nullptr && v[0] != '\0' && std::strchr(v, ';') == nullptr)
+                    fwd += std::string(k) + "=" + v + ";";
+            common.set("env", fwd);
         }
         common.set("rope_type", (int64_t) rope_cfg.type);
         common.set("rope_freq_base", rope_cfg.freq_base);
@@ -9627,7 +9666,7 @@ int main(int argc, char** argv) {
     }
     // STRATA_PIPE_ADAPT_EVERY (batch_groups.hpp; the rounds run in the pipelined loop below): said once here, with the
     // other start-up lines, before READY
-    if (o.serve && o.batch > 0 && o.batch_groups > 1 && multi_gpu) {
+    if (o.serve && o.batch > 0 && o.batch_groups > 1 && (multi_gpu || pool_coord)) {   // (POOL: the workers are stages)
         const int every = strata::program::batch_groups::pipe_adapt_every(std::getenv("STRATA_PIPE_ADAPT_EVERY"));
         if (every > 0)
             std::fprintf(stderr, "strata batch: STRATA_PIPE_ADAPT_EVERY=%d: the pipelined groups run an adaptive-tier round "

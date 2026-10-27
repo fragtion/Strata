@@ -331,6 +331,32 @@ out of the pool. The automatic split would give it as few layers as it can.
 --pool-wait-s S              connecting to and loading the workers at start (default 900)
 ```
 
+## Opt-in switches for a split
+
+Some of Strata's engine switches are off by default and can be tried on a pool. Put them in the coordinator's
+`<config>.pool.json` under `"env"` (or in the model config's own `"env"`), for example:
+
+```json
+"env": {"STRATA_PARK_ASYNC": "1", "STRATA_CKPT_ASYNC": "1", "STRATA_PREFILL_COPY_EVENT_EVERY": "4"}
+```
+
+The coordinator hands the pool-wide ones below to every worker when the split starts (a worker that sets one itself
+keeps its own; its log says `strata pool: from the coordinator: ...`). Restart the coordinator and the workers after a
+change. None of them has been measured on a pool yet, so compare a few replies or prompts with each one on and off.
+
+| Switch | What it does | Where |
+| --- | --- | --- |
+| `STRATA_PARK_ASYNC=1` | parking a conversation copies its K/V to RAM in the background (the copy into a GPU buffer is done before the park returns, so the next request cannot overwrite it) | pool-wide |
+| `STRATA_CKPT_ASYNC=1`, `STRATA_CKPT_GATHER=1` | a conversation checkpoint's running state is copied in the background; its small pieces in one copy | pool-wide |
+| `STRATA_PREFILL_COPY_EVENT_EVERY=N` (try 4-8), `STRATA_PREFILL_COPY_WAIT_DEDUPE=1` | while a prompt streams experts: one copy event every N experts instead of one each, and one wait per release (#4005). Aimed at Windows, where each event record or wait is a submission of its own (about 80 / 45 microseconds on Windows 11); the same bytes | pool-wide |
+| `STRATA_ROUTE_PRIOR=0` (or a value) | Strata 0.2.7's residency-biased routing, on at 1.5 on cards of 13 GiB or less: `0` turns it off on every PC | pool-wide |
+| `STRATA_PIPE_ADAPT_EVERY=N` | with Several chats: the expert cache's swap round every N group windows (the pipeline empties for it; the workers already swap between the windows they serve) | coordinator |
+| `STRATA_PARK_VRAM_MIB=N`, `STRATA_CKPT_VRAM_SLOTS=N` | parked K/V and checkpoints kept in VRAM in front of the RAM copy: costs expert-cache room | each PC, in its own config |
+| `STRATA_DEFAULTS=026` | every default Strata 0.2.7 changed goes back to 0.2.6 | each PC (a worker reads it before the coordinator's settings arrive) |
+
+Layer-major prompt reading (`STRATA_PREFILL_LAYER_MAJOR`, Strata #3976) stays off on a pool PC: its walk has no
+hand-off to other PCs yet.
+
 ## How it is built
 
 | Part | Where |
