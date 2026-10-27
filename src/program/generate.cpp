@@ -274,6 +274,9 @@ const char* const kPoolForwardEnv[] = {
     "STRATA_PREFILL_COPY_EVENT_EVERY", "STRATA_PREFILL_COPY_WAIT_DEDUPE",   // #4005: the prompt walk's copy events
     "STRATA_PARK_ASYNC", "STRATA_CKPT_ASYNC", "STRATA_CKPT_GATHER",           // #3779 / #3712: parks and checkpoints
     "STRATA_ROUTE_PRIOR",                                                      // 0.2.7 residency-biased routing
+    "STRATA_PREFILL_ROUTED_STREAM", "STRATA_PREFILL_ROUTED_STREAM_DEPTH",     // #4283: unrouted streamed experts not copied
+    "STRATA_PF_GROUP_SCRATCH", "STRATA_PF_HC_REGION",                         // #4039: smaller prompt scratch, bigger chunks
+    "STRATA_STAGE_RESIDENT",                                                   // #2968: =0 the old staging sizing
 };
 bool ckpt_pool_env() {
     static const bool on = [] {
