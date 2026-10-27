@@ -125,12 +125,12 @@ measured on their own.
 | Anon - [#652](https://github.com/Niko1221/Strata/pull/652) | only the tokens a verify window hands out are committed | |
 | ATIVX928 - [#1019](https://github.com/Niko1221/Strata/pull/1019) | the int8 K/V gather decodes 8 values per thread | |
 | Maxim Shipko - [#1064](https://github.com/Niko1221/Strata/pull/1064) | commit limits applied after an allocation failure | |
-| sergiywith - [#1231](https://github.com/Niko1221/Strata/pull/1231), [#1284](https://github.com/Niko1221/Strata/pull/1284) | the elastic K/V without a lend; `--adapt-decay` checked | |
-| Yxmura - [#1374](https://github.com/Niko1221/Strata/pull/1374) | IQ1_S on the GPU and on AVX2; IQ1_S and IQ1_M on AVX-512 | Unsloth's UD-IQ1_S models run, on every PC of a pool. Since Strata 0.1.49 the AVX2 IQ1_M rows are Strata's own (about 20-30% faster per expert in our kernel test), and StrataPool sends Qwen's IQ1_M experts to them |
+| sergiywith - [#1231](https://github.com/Niko1221/Strata/pull/1231), [#1284](https://github.com/Niko1221/Strata/pull/1284) (#1284 in Strata since 0.1.52) | the elastic K/V without a lend; `--adapt-decay` checked | |
+| Yxmura - [#1374](https://github.com/Niko1221/Strata/pull/1374) | IQ1_S on the GPU and on AVX2; IQ1_S and IQ1_M on AVX-512 | Unsloth's UD-IQ1_S models run, on every PC of a pool. Since Strata 0.1.49 the AVX2 IQ1_M rows are Strata's own (in 0.1.52 bit-identical to ggml and 7-30% faster per expert than #1374's in our kernel test), and StrataPool sends Qwen's IQ1_M experts to them |
 | anon761 - [#1247](https://github.com/Niko1221/Strata/pull/1247) | a layer split inside one PC: `--prefill-help` | for a pool PC with two cards |
 | Jeremiah Ritchey - [#1290](https://github.com/Niko1221/Strata/pull/1290) | batch-MTP drafters share their weights fully; a slot's draft row only where the context and its answer leave room | **Drafts in several chats** holds less VRAM |
 | lask3802 - [#1748](https://github.com/Niko1221/Strata/pull/1748) (the idea) | a layer split across PCs over TCP ("remote stage"), with every measurement written down | the Windows clock finding behind `POOL-CLOCKS.bat`; workers take the coordinator's `STRATA_ROUTE_TAIL_SKIP` |
-| Xiaomi2008 - [#1911](https://github.com/Niko1221/Strata/pull/1911), [#1912](https://github.com/Niko1221/Strata/pull/1912) (in Strata since 0.1.45) | free VRAM through NVML on Windows (opt-in) | `--pool-affinity measure` times a pool PC's own layers |
+| Xiaomi2008 - [#1911](https://github.com/Niko1221/Strata/pull/1911), [#1912](https://github.com/Niko1221/Strata/pull/1912) (in Strata since 0.1.52 and 0.1.45) | free VRAM through NVML on Windows (opt-in) | `--pool-affinity measure` times a pool PC's own layers |
 | xrip - [#1823](https://github.com/Niko1221/Strata/pull/1823) | whole messages remembered by the tokenizer | |
 | Saber - [#1362](https://github.com/Niko1221/Strata/pull/1362), Arthur031221 - [#1314](https://github.com/Niko1221/Strata/pull/1314) | two tool-call text fixes | |
 
