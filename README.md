@@ -133,6 +133,16 @@ measured on their own.
 | Xiaomi2008 - [#1911](https://github.com/Niko1221/Strata/pull/1911), [#1912](https://github.com/Niko1221/Strata/pull/1912) (in Strata since 0.1.52 and 0.1.45) | free VRAM through NVML on Windows (opt-in) | `--pool-affinity measure` times a pool PC's own layers |
 | xrip - [#1823](https://github.com/Niko1221/Strata/pull/1823) | whole messages remembered by the tokenizer | |
 | Saber - [#1362](https://github.com/Niko1221/Strata/pull/1362), Arthur031221 - [#1314](https://github.com/Niko1221/Strata/pull/1314) | two tool-call text fixes | |
+| Scott Page - [#3789](https://github.com/Niko1221/Strata/pull/3789) (open PR) | Windows: the orphan search before an engine start lists processes by command line only (6.2 s -> 0.1 s) |  |
+| macintog - [#3971](https://github.com/Niko1221/Strata/pull/3971) (open PR) | the thinking budget's continuation keeps the tokens generated past the cut |  |
+| suifei - [#4340](https://github.com/Niko1221/Strata/pull/4340) (open PR) | a long prompt read keeps clients that count events alive | long pool prompt reads no longer time out in strict clients |
+| Amit Tsur (Tsury) - [#4132](https://github.com/Niko1221/Strata/pull/4132) (open PR) | a string argument that quotes a tool call stays exact |  |
+| xrip - [#3404](https://github.com/Niko1221/Strata/pull/3404) (open PR) | an older, shorter copy of the conversation is superseded | frees cache RAM for other conversations |
+| chaog992 - [#3517](https://github.com/Niko1221/Strata/pull/3517) (open PR) | the retention pin follows the system-prompt root |  |
+| merbanan - [#4039](https://github.com/Niko1221/Strata/pull/4039) (open PR) | `STRATA_PF_GROUP_SCRATCH`, `STRATA_PF_HC_REGION` (opt-in, bitwise) | forwarded to the workers; see docs/POOL.md |
+| sergiywith - [#2968](https://github.com/Niko1221/Strata/pull/2968) (open PR) | experts staged from the resident arena keep the full ring |  |
+| Vop3p - [#3382](https://github.com/Niko1221/Strata/pull/3382) (open PR) | `STRATA_PREFILL_CPU_SHARE_BATCH` (opt-in) | coordinator only |
+| Stefano Sinden (bitaccesscomau) - [#4283](https://github.com/Niko1221/Strata/pull/4283) (open PR) | `STRATA_PREFILL_ROUTED_STREAM` (opt-in): unrouted streamed experts not copied | forwarded to the workers; replaces `STRATA_PREFILL_COPY_EVENT_EVERY` when both are set |
 
 Strata 0.1.40.2 took in [#851](https://github.com/Niko1221/Strata/pull/851), [#789](https://github.com/Niko1221/Strata/pull/789),
 [#813](https://github.com/Niko1221/Strata/pull/813), [#1063](https://github.com/Niko1221/Strata/pull/1063),
