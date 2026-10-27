@@ -9173,6 +9173,7 @@ def main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> in
             raise SystemExit(f"[strata] config {e}")
         base_args = base_args + (effort_end or [])
         groups = []                                     # replicas' card groups: none on a pool PC (one engine each)
+        split = None                                    # split serving (two cards, one model): none on a pool PC
         if pc.role == "worker":
             # the chat engine stays off: the worker engine (serve/pool.py) runs the layers a coordinator assigns
             print(f"[pool] this PC is a pool worker: it lends its GPU to a coordinator (port {pc['worker_port']})",

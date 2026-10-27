@@ -528,3 +528,16 @@ class Routing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PoolMainBindsUpstreamNames(unittest.TestCase):
+    """main()'s pool branches skip upstream's replica / split-serve setup: the names upstream reads after it must be
+    bound before the branches (0.2.x: `split` was unbound on a coordinator and a worker - UnboundLocalError)."""
+
+    def test_split_and_groups_bound_before_the_pool_branches(self):
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py"), encoding="utf-8").read()
+        branch = src.index('        if pc.role == "worker":\n            # the chat engine stays off')
+        head = src[:branch]
+        for name in ("groups", "split"):
+            self.assertRegex(head[head.rindex("def main("):], rf"\n        {name} = (\[\]|None) ",
+                             f"{name} is not bound before main()'s pool branches")
