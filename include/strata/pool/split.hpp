@@ -43,7 +43,7 @@ struct SplitCalib {
     /// the splits these numbers were measured with ("33", "16,32"): one measurement cannot tell a node's per-layer
     /// time from its misses' cost, so the scaled estimate is only trusted near them (kTrust layers per split point)
     std::vector<std::string> seen;
-    bool near(const std::vector<int64_t>& at) const;
+    bool near_seen(const std::vector<int64_t>& at) const;
     double fixed_ms = 0, net_ms = 0;
     int64_t windows = 0;
     /// splits a worker failed to load (it ran out of memory on the way): the automatic split no longer gives any

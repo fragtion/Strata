@@ -338,7 +338,7 @@ static void test_measured_split() {
     m.calib = &near_c;
     const SplitPlan close = auto_split(m, {a, b});
     CHECK(close.ok && close.measured && std::llabs(close.at[0] - base.at[0]) <= SplitCalib::kTrust);
-    CHECK(near_c.near({base.at[0] + 3}) && !near_c.near({base.at[0] + 4}));
+    CHECK(near_c.near_seen({base.at[0] + 3}) && !near_c.near_seen({base.at[0] + 4}));
     SplitCalib far_c = c;
     far_c.seen = {"16,32"};                   // measured with another pool's shape: the built-in estimate
     m.calib = &far_c;
@@ -364,7 +364,7 @@ static void test_measured_split() {
     s2.add({20.0, 10.0}, {10.0, 10.0}, 12.0, 3.0, 300, {33});
     s2.add({20.0, 10.0}, {10.0, 10.0}, 12.0, 3.0, 300, {30});
     CHECK(save_calib(path, "pool S", s2, err) && load_calib(path, "pool S", r) && r.seen.size() == 2 &&
-          r.seen[0] == "33" && r.seen[1] == "30" && r.near({27}) && !r.near({26}));
+          r.seen[0] == "33" && r.seen[1] == "30" && r.near_seen({27}) && !r.near_seen({26}));
     std::remove(path.c_str());
 }
 

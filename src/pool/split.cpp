@@ -130,7 +130,7 @@ void SplitCalib::add_failed(const std::vector<int64_t>& at) {
     if (failed.size() > 8) failed.erase(failed.begin());
 }
 
-bool SplitCalib::near(const std::vector<int64_t>& at) const {
+bool SplitCalib::near_seen(const std::vector<int64_t>& at) const {
     if (seen.empty()) return true;
     for (const std::string& s : seen) {
         std::vector<int64_t> p;
@@ -293,7 +293,7 @@ SplitPlan auto_split(const SplitModel& m, const std::vector<NodeCap>& nodes) {
     // searches everywhere (and takes over when nothing near a measured split fits any more)
     const bool trust = m.calib != nullptr && m.calib->usable(nodes.size());
     auto consider = [&](const std::vector<int64_t>& at) {
-        if (trust && !m.calib->near(at)) return;
+        if (trust && !m.calib->near_seen(at)) return;
         if (m.failures != nullptr && m.failures->excludes(at, L)) {
             last_why = "the splits that fit give a worker as much as one it failed to load (" +
                        m.failures->failed.back() + "; delete pool-split-measured.txt to try them again)";
