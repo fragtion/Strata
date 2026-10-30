@@ -746,6 +746,7 @@ def narrate_start(log_path: str, offset: int, args: list, done: threading.Event,
 
     say("weights", "[strata] starting the engine: reading the model's weights ...")
     pos = offset
+    pool_wait = None                                    # StrataPool: the worker a coordinator's start waits for
     while not done.wait(0.5):
         try:
             with open(log_path, "rb") as f:
@@ -770,9 +771,20 @@ def narrate_start(log_path: str, offset: int, args: list, done: threading.Event,
                     say("cache", f"[strata] filling the GPU's expert cache ({n}) ...")
                 elif "session is up" in line:
                     say("up", "[strata] almost ready ...")
+                elif line.startswith("strata pool: waiting for worker "):
+                    pool_wait = line[len("strata pool: waiting for worker "):].strip().rstrip(".").strip()
+                    say("poolwait", f"[pool] waiting for the worker {pool_wait}: start StrataPool on that PC with "
+                                    "its pool role set to Worker, or set this PC's role to Off in the Pool tab "
+                                    "(the Pool link above) to run the model alone")
+                elif line.startswith("strata pool:") and "connected" in line:
+                    pool_wait = None
         if time.time() - last > heartbeat:
             last = time.time()
-            print(f"[strata] still starting ({time.time() - t0:.0f} s) - please wait ...", flush=True)
+            if pool_wait:
+                print(f"[pool] still waiting for the worker {pool_wait} ({time.time() - t0:.0f} s; the pool gives "
+                      "up after 15 minutes)", flush=True)
+            else:
+                print(f"[strata] still starting ({time.time() - t0:.0f} s) - please wait ...", flush=True)
 
 
 class ConvCacheLog:

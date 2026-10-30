@@ -640,3 +640,31 @@ class EndAStartThatWaits(unittest.TestCase):
         pm.applying = "stopping the current engine"            # no start under way: an apply in progress
         with self.assertRaises(ValueError):
             pm.apply({"role": "off"})
+
+
+class StartNarratorNamesTheWorker(unittest.TestCase):
+    """A coordinator's start that waits for an offline worker says so in the server window, not "still starting"."""
+
+    def test_waiting_for_a_worker_is_said(self):
+        import contextlib
+        import io
+        from serve import server
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "engine.log")
+            with open(log, "w", encoding="utf-8") as f:
+                f.write("strata pool: coordinator: connecting to 1 worker (192.168.10.81:7701)\n"
+                        "strata pool: waiting for worker 192.168.10.81:7701 (192.168.10.81:7701: no answer "
+                        "(timed out)) ...\n")
+            done, out = threading.Event(), io.StringIO()
+            with contextlib.redirect_stdout(out):
+                t = threading.Thread(target=server.narrate_start, args=(log, 0, [], done, 0.3), daemon=True)
+                t.start()
+                time.sleep(1.5)
+                done.set()
+                t.join(5)
+            text = out.getvalue()
+            self.assertIn("[pool] waiting for the worker 192.168.10.81:7701 (192.168.10.81:7701: no answer (timed out))",
+                          text)
+            self.assertIn("Off in the Pool tab", text)
+            self.assertIn("[pool] still waiting for the worker 192.168.10.81:7701", text)
+            self.assertNotIn("still starting", text)
