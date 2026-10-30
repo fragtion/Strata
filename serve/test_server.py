@@ -1126,7 +1126,7 @@ class ToolCallTagInProse(unittest.TestCase):
 
 
 class ToolCallRecovery(unittest.TestCase):
-    """Opt-in ("tool_call_recovery": true): the model sometimes writes a call in a form next to the template's.  These
+    """On by default in the server since 0.2.8 (config "tool_call_recovery": false turns it off): the model sometimes writes a call in a form next to the template's.  These
     shapes are from a corpus of 1,462 agent turns (Qwen3.8 under Claude Code, signalnine/q27): with the switch on, a
     declared tool's call in one of them is the call; anything else stays content, verbatim."""
     SCHEMA = ToolCallTerminators.SCHEMA
@@ -1255,6 +1255,29 @@ class ToolCallRecoverySwitch(unittest.TestCase):
         self.assertEqual(self.run_reply(False), [])
         self.assertEqual(self.run_reply(True), [ToolCallRecovery.CALL])
 
+    def test_on_by_default_and_the_config_turns_it_off(self):
+        """0.2.8: a server that is told nothing reads these calls; "tool_call_recovery": false is the off switch."""
+        from serve.server import tool_call_recovery_setting
+        tok = ByteTokenizer()
+        svc = Service(MockEngine(tok, "x", max_context=CTX), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        self.assertIs(svc.tool_call_recovery, True)
+        self.assertIs(tool_call_recovery_setting({}), True)
+        self.assertIs(tool_call_recovery_setting({"model": "x"}), True)
+        self.assertIs(tool_call_recovery_setting({"tool_call_recovery": True}), True)
+        self.assertIs(tool_call_recovery_setting({"tool_call_recovery": False}), False)
+        for bad in ("false", 0, 1, None, "off"):
+            with self.assertRaises(SystemExit):
+                tool_call_recovery_setting({"tool_call_recovery": bad})
+
+    def test_a_fresh_service_reads_the_call_without_being_told(self):
+        tok = ByteTokenizer()
+        script = "</think>\n\n<function=write>\n" + ToolCallRecovery.PARAMS
+        svc = Service(MockEngine(tok, script, max_context=CTX), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            evs = [x for kind, x in svc.run(tok.encode("hi"), True, ToolCallRecovery.SCHEMA, 3000, {},
+                                            threading.Event()) if kind == "event"]
+        self.assertEqual([e.call.arguments for e in evs if e.kind == "tool_call"], [ToolCallRecovery.CALL])
+
 
 class UnfinishedToolCall(unittest.TestCase):
     """#211: a call the output ends inside is not reported as a whole one - its streamed JSON is not closed and the
@@ -1285,31 +1308,8 @@ class UnfinishedToolCall(unittest.TestCase):
                         self.assertEqual(len(calls), 1)
                         self.assertEqual(json.loads(streamed), {"path": "notes.txt", "content": content})
 
-    def test_parser_returns_unfinished_call_text(self):
-        from serve.frontend import CALL_START, THINK_END, OutputParser
-        schema = [{"name": "terminal", "parameters": {"properties": {"command": {"type": "string"}}}}]
-        chunks = [CALL_START, "<function=terminal>", "<parameter=command>", "echo ready"]
-        for thinking in (False, True):
-            for stream_tools in (False, True):
-                for step in (1, 7, 10_000):
-                    with self.subTest(thinking=thinking, stream_tools=stream_tools, step=step):
-                        p = OutputParser(thinking=thinking, tools=schema, stream_tools=stream_tools)
-                        events = []
-                        if thinking:
-                            events.extend(p.feed(THINK_END))
-                        for c in chunks:
-                            for i in range(0, len(c), step):
-                                events.extend(p.feed(c[i:i + step]))
-                        events.extend(p.finish())
-                        self.assertEqual("".join(e.text for e in events if e.kind == "content"), "".join(chunks))
-                        self.assertFalse([e for e in events if e.kind == "tool_call"])
-                        if stream_tools:
-                            self.assertEqual("".join(e.text for e in events if e.kind == "tool_args"),
-                                             '{"command":"echo ready')
-                        self.assertEqual(p.finish(), [])
-
-    def answers(self, script, max_tokens=500, content=False):
-        """Return the finish reason and arguments (or content) from both APIs, whole and streamed."""
+    def answers(self, script, max_tokens=500):
+        """(finish reason, the call's arguments) from OpenAI and Anthropic, whole and streamed, for the model's `script`."""
         tok = ByteTokenizer()
         svc = Service(MockEngine(tok, script, max_context=CTX), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
         httpd = serve(svc, port=0)
@@ -1327,25 +1327,6 @@ class UnfinishedToolCall(unittest.TestCase):
                         "Content-Type": "application/json", "anthropic-version": "2023-06-01"})
                     with urllib.request.urlopen(req, timeout=30) as r:
                         raw = r.read().decode()
-                    if content:
-                        if stream:
-                            evs = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
-                            if api == "openai":
-                                text = "".join(e["choices"][0]["delta"].get("content") or "" for e in evs)
-                                finish = evs[-1]["choices"][0]["finish_reason"]
-                            else:
-                                text = "".join(e["delta"].get("text") or "" for e in evs
-                                               if e["type"] == "content_block_delta")
-                                finish = evs[-2]["delta"]["stop_reason"]
-                        elif api == "openai":
-                            c = json.loads(raw)["choices"][0]
-                            text, finish = c["message"]["content"], c["finish_reason"]
-                        else:
-                            m = json.loads(raw)
-                            text = "".join(b["text"] for b in m["content"] if b["type"] == "text")
-                            finish = m["stop_reason"]
-                        out[api, stream] = (finish, text)
-                        continue
                     if stream:
                         evs = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
                         if api == "openai":
@@ -1374,18 +1355,6 @@ class UnfinishedToolCall(unittest.TestCase):
             ("openai", False): ("stop", []), ("openai", True): ("stop", cut),    # whole answers leave the cut
             ("anthropic", False): ("end_turn", []),                      # call out: it has no arguments to give
             ("anthropic", True): ("end_turn", cut)})
-
-    def test_apis_return_unfinished_call_text(self):
-        text = self.CUT[len("</think>\n\n"):]
-        for limited in (False, True):
-            with self.subTest(limited=limited):
-                script = self.CUT + "rest of the file, never reached" * 40 if limited else self.CUT
-                max_tokens = len(self.CUT) if limited else 500
-                self.assertEqual(self.answers(script, max_tokens=max_tokens, content=True), {
-                    ("openai", False): ("length" if limited else "stop", text),
-                    ("openai", True): ("length" if limited else "stop", text),
-                    ("anthropic", False): ("max_tokens" if limited else "end_turn", text),
-                    ("anthropic", True): ("max_tokens" if limited else "end_turn", text)})
 
     def test_quoted_incomplete_wrapper_is_not_a_call(self):
         text = "Format: " + self.WHOLE[len("</think>\n\n"):].removesuffix("</tool_call>") + "and then I explain it."

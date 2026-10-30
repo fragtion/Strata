@@ -95,6 +95,16 @@ bool host_available_memory(HostMemory& m, const std::string& meminfo = "/proc/me
                            const std::string& self_cgroup = "/proc/self/cgroup",
                            const std::string& cgroup_root = "/sys/fs/cgroup");
 
+/// #4051: wait for the RAM an arena needs to come back.  An engine that was still exiting (or a program that was ending)
+/// holds memory a few seconds longer than its process; loading into that shortfall sent a 60 GiB host into reclaim for
+/// good.  Calls `sample(available)` (false: the RAM cannot be read; the wait ends) every `step_s` seconds, through
+/// `sleep(step_s)`, until `available >= need` or `max_wait_s` seconds have gone.  `waited` gets the seconds waited,
+/// `available` the last reading.  True when the RAM is there.  `progress(waited, available)` is called about every
+/// `note_s` seconds while waiting.  `max_wait_s <= 0` is no wait at all.
+bool wait_for_ram(uint64_t need, double max_wait_s, double step_s, double note_s,
+                  const std::function<bool(uint64_t&)>& sample, const std::function<void(double)>& sleep,
+                  const std::function<void(double, uint64_t)>& progress, double& waited, uint64_t& available);
+
 /// Bound a resident budget by RAM and commit capacity after headroom; leave 256 MiB more when clamping.
 /// Pass UINT64_MAX for the initial RAM-only attempt or when the platform does not report commit capacity.
 uint64_t clamp_resident_budget(uint64_t requested, uint64_t physical, uint64_t commit, uint64_t headroom);
