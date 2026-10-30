@@ -298,7 +298,8 @@
     badge.className = "st-badge" + (n.state === "serving" || n.state === "running" ? " st-badge--generating" :
       n.state === "error" ? " st-badge--error" : n.state === "loading" || n.state === "starting" ? " st-badge--reading" : "");
     // notices: an apply in progress, the last error, what the run config cannot do in a pool
-    if (state.applying) notice("info", `Applying: ${state.applying} …`);
+    if (state.applying) notice("info", `Applying: ${state.applying} …` +
+                               (state.starting ? " (Apply or Restart engine ends this start and goes on)" : ""));
     else if (state.error) notice("error", state.error);
     else if (draft.role !== "off" && (state.problems || []).length) notice("warn", state.problems.join("; "));
     else if (draft.role === "coordinator" && !draft.peers.some((p) => p.enabled)) notice("warn", "Add at least one worker.");
@@ -336,8 +337,10 @@
     }
     if (state.config.role === "worker") renderWorker();
     $("pool-dirty").textContent = dirty ? "Not applied yet: Apply restarts the model with these settings." : "";
-    $("pool-apply").disabled = busy || !!state.applying;
-    $("pool-restart").disabled = busy || !!state.applying || state.config.role === "off" || state.config.role === "router";
+    // a start that waits for the workers (up to 15 min) can be ended: Apply or Restart ends it and goes on
+    const locked = !!state.applying && !state.starting;
+    $("pool-apply").disabled = busy || locked;
+    $("pool-restart").disabled = busy || locked || state.config.role === "off" || state.config.role === "router";
   }
 
   // ---------------------------------------------------------------- editing

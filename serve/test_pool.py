@@ -12,6 +12,7 @@ import stat
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import unittest
 import urllib.error
@@ -541,3 +542,101 @@ class PoolMainBindsUpstreamNames(unittest.TestCase):
         for name in ("groups", "split"):
             self.assertRegex(head[head.rindex("def main("):], rf"\n        {name} = (\[\]|None) ",
                              f"{name} is not bound before main()'s pool branches")
+
+
+class EndAStartThatWaits(unittest.TestCase):
+    """A coordinator whose worker is offline (or runs alone) waits at its start for up to 15 minutes holding the engine's
+    turn: Apply (Off) and Restart engine must end that start, not wait behind it or be refused."""
+
+    class Proc:
+        def __init__(self):
+            self.killed = threading.Event()
+
+        def poll(self):
+            return -9 if self.killed.is_set() else None
+
+        def kill(self):
+            self.killed.set()
+
+    def make(self, role="coordinator"):
+        test = self
+
+        class Engine:
+            def __init__(self):
+                self.spawn = ("strata.exe", [], None, None, {}, False, None)
+                self.proc = None
+                self.running = False
+
+            def alive(self):
+                return self.running
+
+            def unload(self):
+                self.running = False
+
+        class Svc:
+            def __init__(self):
+                self.fifo = threading.Lock()
+                self.engine = Engine()
+                self.starts = []                     # the args of each start, and how it ended
+
+            def loaded(self):
+                return self.engine.running
+
+            def load(self):
+                with self.fifo:
+                    args = list(self.engine.spawn[1])
+                    proc = test.Proc()
+                    self.engine.proc = proc
+                    if "--pool-peers" in args:   # a coordinator: waits for its workers until the process is killed
+                        if not proc.killed.wait(20):
+                            self.starts.append((args, "timed out"))
+                            raise RuntimeError("waited for the workers")
+                        self.starts.append((args, "killed"))
+                        raise RuntimeError("the engine exited before it was ready")
+                    self.engine.running = True
+                    self.starts.append((args, "ready"))
+
+        svc = Svc()
+        cfg = {"args": ["--max-context", "4096"]}
+        pc = PoolConfig(None, {**PoolConfig.clean({}), "role": role, "secret": "s3cret-s3cret",
+                               "peers": [{"addr": "192.168.10.81:7701", "enabled": True}]})
+        pm = PoolManager(svc, cfg, pc, cfg["args"], {}, 0, echo=lambda m: None)
+        pm.pc.save = lambda: None
+        svc.engine.spawn = ("strata.exe", pm.engine_args(), None, None, {}, False, None)
+        return svc, pm
+
+    def wait(self, cond, s=10.0):
+        end = time.time() + s
+        while not cond() and time.time() < end:
+            time.sleep(0.02)
+        self.assertTrue(cond())
+
+    def test_off_ends_a_coordinator_start_that_waits_for_its_workers(self):
+        svc, pm = self.make()
+        pm.load_in_background()
+        self.wait(lambda: svc.engine.proc is not None and pm.starting())
+        self.assertTrue(pm.starting())                          # GET /pool: "starting" (the tab enables Apply)
+        self.assertEqual(pm.apply({"role": "off"}), {"status": "applying"})   # not "a change is still being applied"
+        self.wait(lambda: svc.loaded() and pm.applying is None)
+        self.assertEqual([how for _, how in svc.starts], ["killed", "ready"])
+        self.assertNotIn("--pool-peers", svc.starts[-1][0])    # the second start runs the model alone
+        self.assertIsNone(pm.last_error)                        # an ended start is not reported as a failure
+        self.assertFalse(pm.starting())
+
+    def test_restart_ends_the_waiting_start_and_starts_again(self):
+        svc, pm = self.make()
+        pm.load_in_background()
+        self.wait(lambda: svc.engine.proc is not None and pm.starting())
+        first = svc.engine.proc
+        pm.restart_engine()
+        self.wait(lambda: first.killed.is_set())
+        self.wait(lambda: len(svc.starts) == 1 and svc.engine.proc is not first and pm.starting())
+        self.assertIn("--pool-peers", svc.engine.spawn[1])      # still a coordinator: it waits for the workers again
+        pm.apply({"role": "off"})                               # and that start can be ended too
+        self.wait(lambda: svc.loaded())
+
+    def test_a_change_behind_another_change_is_still_refused(self):
+        svc, pm = self.make(role="off")
+        pm.applying = "stopping the current engine"            # no start under way: an apply in progress
+        with self.assertRaises(ValueError):
+            pm.apply({"role": "off"})

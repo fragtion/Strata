@@ -620,6 +620,8 @@ class PoolManager:
         self.discovery: Discovery | None = None
         self.lock = threading.Lock()
         self.applying = None                         # what an apply in progress is doing
+        self.load_thread = None                      # load_in_background's thread while the model starts
+        self.ending_start = False                    # _end_start is ending that start (a role change or a restart)
         self.last_error = None
         self.peer_cache: dict[str, dict] = {}
         self.peer_cache_at = 0.0
@@ -674,21 +676,56 @@ class PoolManager:
     def load_in_background(self):
         """The chat engine (standalone or coordinator) loads on a thread: the web app stays up meanwhile and shows
         why it fails (a worker that is offline, a different model on a worker) instead of the server exiting."""
+        phase = "loading the model" + (" and connecting to the workers" if self.pc.role == "coordinator" else "")
+
         def run():
             try:
-                self.applying = "loading the model" + (" and connecting to the workers"
-                                                       if self.pc.role == "coordinator" else "")
+                self.applying = phase
                 self.svc.load()
                 self.last_error = None
             except Exception as e:  # noqa: BLE001 - shown in the Pool tab
+                if self.ending_start:                # ended on purpose (_end_start): not an error
+                    return
                 note = ""
                 if hasattr(self.svc.engine, "death_note"):
                     note = self._engine_pool_error()
                 self.last_error = (note or str(e))
                 self.echo(f"[pool] the model did not start: {self.last_error}")
             finally:
-                self.applying = None
-        threading.Thread(target=run, daemon=True).start()
+                if self.applying == phase:           # a role change that ended this start has its own phase
+                    self.applying = None
+        self.load_thread = threading.Thread(target=run, daemon=True)
+        self.load_thread.start()
+
+    def starting(self) -> bool:
+        """The model is still starting on load_in_background's thread (a coordinator waits there for its workers, up
+        to the engine's --pool-wait-s, 15 minutes, holding the engine's turn)."""
+        t = self.load_thread
+        return t is not None and t.is_alive()
+
+    def _end_start(self, wait_s: float = 90.0) -> None:
+        """End a start that is still running, so a role change or a restart does not wait behind it: a coordinator
+        whose worker is offline (or runs alone) would otherwise hold the engine's turn until --pool-wait-s ran out.
+        The engine process is killed (it has loaded nothing anyone is using yet) until the start's thread has given
+        up; a start the launcher tries again is killed again."""
+        if not self.starting():
+            return
+        self.echo("[pool] ending the model's start that is still under way (it waits for the workers) ...")
+        self.ending_start = True
+        try:
+            deadline = time.time() + wait_s
+            while self.starting() and time.time() < deadline:
+                proc = getattr(self.svc.engine, "proc", None)
+                if proc is not None and proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                self.load_thread.join(timeout=0.25)
+            if self.starting():
+                raise RuntimeError(f"the model's start did not end within {wait_s:.0f} s; restart the app")
+        finally:
+            self.ending_start = False
 
     def _engine_pool_error(self) -> str:
         """The engine's own last 'strata pool:' line (a worker that is offline, a model that differs, ...)."""
@@ -719,7 +756,7 @@ class PoolManager:
         if problems:
             raise ValueError("; ".join(problems))
         with self.lock:
-            if self.applying:
+            if self.applying and not self.starting():   # a start that waits for workers is ended instead (_switch)
                 raise ValueError("a change is still being applied: " + self.applying)
             old_role = self.pc.role
             self.pc.data = data
@@ -733,6 +770,7 @@ class PoolManager:
         self.last_error = None
         self.applying = "stopping the current engine"
         try:
+            self._end_start()                        # a start still waiting for its workers holds the engine's turn
             if role != "router":
                 self._stop_router()
             if self.worker is not None:
@@ -774,7 +812,8 @@ class PoolManager:
             self.applying = None
 
     def restart_engine(self):
-        """POST /pool/restart: the chat engine again (after a worker came online)."""
+        """POST /pool/restart: the chat engine again (after a worker came online).  A start that is still waiting for
+        the workers is ended first (_switch)."""
         if self.pc.role == "worker":
             if self.worker is not None:
                 self.worker.stop()
@@ -891,7 +930,7 @@ class PoolManager:
                               "listening": bool(self.discovery and self.discovery.listening),
                               "error": self.discovery.error if self.discovery else None},
                 "router": self.router.state() if self.router else None,
-                "applying": self.applying, "error": self.last_error,
+                "applying": self.applying, "starting": self.starting(), "error": self.last_error,
                 "problems": config_problems(self.cfg, PoolConfig(None, {**self.pc.data, "role": "coordinator"})),
                 "addresses": self.addresses()}
 
