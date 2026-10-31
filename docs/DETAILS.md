@@ -685,9 +685,12 @@ tables per token). The scaling is fixed for the whole run, because the KV cache 
 
 A request that continues a chat reads only the part after what the engine already holds: the live session, or one of the
 checkpoints in RAM (up to 6, about 118 MB each, taken at the start of each new assistant turn and every 16K prompt tokens). A
-checkpoint is used only when the prompt starts with exactly its tokens and pictures. The oldest checkpoint, in practice
-the end of the system prompt that every chat of a client shares, is kept for good, so a new chat that shares the prefix
-starts after it. A prompt of 2,048 tokens or more is also checkpointed at the end of its system prompt. Claude Code stamps its
+checkpoint is used only when the prompt starts with exactly its tokens and pictures. The checkpoint at the end of the system
+prompt, which every chat of a client shares, is kept for good, so a new chat that shares the prefix starts after it. It is
+found by its turn boundary, not by age: a system prompt that ends past the first 16K periodic checkpoint still keeps its
+root, and the grid checkpoints before it rotate like any other (under `--prompt-cache-spread` the first of them stays).
+Without such a root the oldest checkpoint holds the pin. A prompt of 2,048 tokens or more is also checkpointed at the end of
+its system prompt. Claude Code stamps its
 system prompt with a billing header that changes on every request; the server pins both stamps so the prompt stays the same.
 
 | Option | Effect |
@@ -1065,6 +1068,16 @@ measured. "Exact" means the 10-prompt and 4K/20K identity gate with the switch o
 
 `STRATA_DEQUANT_WIDE` (wide dequantization of Q4_K, Q5_K, Q6_K and IQ4_XS for the prompt's dense weights) is on by default on
 sm_86 and sm_61, bit-exact. `STRATA_DEQUANT_WIDE=0` turns it off.
+
+`STRATA_PREFILL_ROUTED_STREAM=1` (opt-in; the streamed prompt walk of a chunk of 1,024 tokens or more, one GPU, the issuer
+thread): the issuer keeps at most `STRATA_PREFILL_ROUTED_STREAM_DEPTH` copies (default 16) queued ahead of the PCIe link,
+each layer's routing is handed to it as soon as the layer's router has run, and an expert not yet copied that no token of
+the chunk routes to is not copied at all. The routed experts go into the same ring slots as without the switch, so the
+prompt's results are the same bits, and the slots the prompt borrowed are refilled from RAM as before. With `STRATA_TRACE=1`
+each chunk prints how many ring entries it copied and how many it dropped. On an RTX 3090 (PCIe 3.0 x16, 250 W) with the
+Swift IQ3_XXS pack at the release defaults, 23% fewer experts were streamed for a 2K prompt and 4% fewer at 32K (8,192-token
+chunks); a 1,790-token follow-up read on an 18.8K-token conversation took 18% less time and fresh 2K, 4K and 32K reads ran
+20%, 8% and 5% faster (4 pairs), with byte-identical replies in a deterministic lane at 1K to 32K.
 
 ### RTX 20 (Turing, sm_75) kernels (opt-in)
 
